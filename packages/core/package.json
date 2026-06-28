@@ -1,0 +1,77 @@
+{
+  "name": "demesne",
+  "version": "0.1.0",
+  "description": "Type-safe dependency injection: a container holds your services' domain and provides it. Requirements and construction errors are tracked in the type system. Complements unthrown.",
+  "keywords": [
+    "container",
+    "context",
+    "dependency-injection",
+    "di",
+    "effect",
+    "inversion-of-control",
+    "ioc",
+    "layer",
+    "service-locator",
+    "type-safe",
+    "typescript",
+    "unthrown"
+  ],
+  "homepage": "https://github.com/btravstack/demesne#readme",
+  "bugs": {
+    "url": "https://github.com/btravstack/demesne/issues"
+  },
+  "license": "MIT",
+  "author": "Benoit TRAVERS <benoit.travers.fr@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/btravstack/demesne.git",
+    "directory": "packages/core"
+  },
+  "files": [
+    "dist",
+    "docs"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --format cjs,esm --dts --clean",
+    "build:docs": "typedoc",
+    "dev": "tsdown src/index.ts --format cjs,esm --dts --watch",
+    "test": "vitest run",
+    "test:types": "tsc --noEmit -p tsconfig.test-d.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test-d.json"
+  },
+  "devDependencies": {
+    "@demesne/tsconfig": "workspace:*",
+    "@demesne/typedoc": "workspace:*",
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "tsdown": "catalog:",
+    "typedoc": "catalog:",
+    "typedoc-plugin-markdown": "catalog:",
+    "typescript": "catalog:",
+    "unthrown": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "unthrown": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}
