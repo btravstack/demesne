@@ -177,6 +177,50 @@ that `match` must handle.
   raw `Promise` must never enter a combinator. Re-enter the typed world with
   `fromPromise` / `fromSafePromise`, exactly as in `unthrown`.
 
+## Configuration (recipe)
+
+Reading config from the environment and validating it is just a **fallible `make`** fed
+by [`@unthrown/standard-schema`](https://github.com/btravstack/unthrown/tree/main/packages/standard-schema) —
+demesne adds no config primitive of its own (that would break "does one thing: wiring").
+The schema → `Result` bridge already lives in unthrown's ecosystem; demesne only wires
+the validated result.
+
+Inject the raw environment as a **port** rather than reaching for `process.env` inside
+the layer — it keeps config testable (fake env in tests, real env at the edge) and is
+the boundary-declared style demesne favours.
+
+```ts
+import { build, type Context, make, provideTo, Tag, value } from "demesne";
+import { fromSchema, type SchemaIssues } from "@unthrown/standard-schema";
+import { TaggedError } from "unthrown";
+import { z } from "zod"; // any Standard Schema validator (zod / valibot / arktype)
+
+// The raw environment is a provided port.
+class Env extends Tag("Env")<Env, Record<string, string | undefined>>() {}
+
+const ConfigSchema = z.object({ dbUrl: z.string().url() });
+class AppConfig extends Tag("AppConfig")<AppConfig, z.infer<typeof ConfigSchema>>() {}
+
+// A modeled, discriminated error for the E channel (nicer at the edge than a raw
+// issues array). Drop the `mapErr` if `SchemaIssues` is fine for you.
+class ConfigError extends TaggedError("ConfigError")<{ issues: SchemaIssues }> {}
+
+// Sync + fallible: validate the injected env against the schema.
+const AppConfigLive = make(AppConfig, (ctx: Context<Env>) =>
+  fromSchema(ConfigSchema)(ctx.get(Env)).mapErr((issues) => new ConfigError({ issues })),
+);
+//    ^? Layer<AppConfig, ConfigError, Env>
+
+// Wire the env at the composition edge.
+const result = await build(provideTo(AppConfigLive, value(Env, process.env)));
+//    ^? Result<Context<AppConfig>, ConfigError>
+```
+
+Use `fromSchemaAsync` instead if your schema validates asynchronously — it returns an
+`AsyncResult`, which `make` accepts unchanged. If you find yourself repeating this trio,
+it promotes cleanly into a thin `@demesne/standard-schema` adapter package (the monorepo
+is built to grow that way) — but it does **not** belong in the core.
+
 ## Roadmap
 
 demesne ships the wiring core today. Two capabilities are deliberately **not yet**
