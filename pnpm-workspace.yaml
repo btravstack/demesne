@@ -16,7 +16,7 @@ catalog:
   "@vitest/coverage-v8": 4.1.8
   knip: 6.16.1
   lefthook: 2.1.9
-  oxfmt: 0.54.0
+  oxfmt: 0.55.0
   oxlint: 1.69.0
   tsdown: 0.22.2
   turbo: 2.9.18
