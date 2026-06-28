@@ -31,7 +31,22 @@ Three concepts:
 
 - **`Tag<Self, Service>`** — a typed key. Its nominal identity (the class + a literal
   `Id`) is what appears in the requirement union `R`; the second parameter is the
-  service shape. Two structurally identical services never collide.
+  service shape. Two structurally identical services never collide. Define a service
+  by inlining its shape — the class **is** the tag:
+
+  ```ts
+  class LoggerService extends Tag("LoggerService")<
+    LoggerService,
+    {
+      readonly log: (msg: string) => void;
+    }
+  >() {}
+  ```
+
+  The identifier now names the tag, not the shape; recover the shape by name with
+  `type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never` when a signature
+  needs it.
+
 - **`Context<R>`** — an immutable map from tag to service. `get` only accepts a tag
   whose identity is in `R` (reading an absent service is a compile error). It is
   **contravariant** in `R`: a `Context<A | B>` works wherever a `Context<A>` is asked.
@@ -54,61 +69,66 @@ Constructors, by how construction is qualified:
 import { build, type Context, factory, make, merge, provideTo, Tag, value } from "demesne";
 import { Err, fromPromise, Ok, type Result, TaggedError } from "unthrown";
 
-// --- service contracts (ports) ---
-interface LoggerService {
-  readonly log: (msg: string) => void;
-}
-class Logger extends Tag("Logger")<Logger, LoggerService>() {}
+// Recover a service's shape from its tag when a signature wants it by name.
+type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
 
-interface Config {
-  readonly dbUrl: string;
-}
-class AppConfig extends Tag("AppConfig")<AppConfig, Config>() {}
+// --- service tags (the class IS the tag; the service shape is inlined) ---
+class LoggerService extends Tag("LoggerService")<
+  LoggerService,
+  {
+    readonly log: (msg: string) => void;
+  }
+>() {}
 
-interface DatabaseService {
-  readonly query: (sql: string) => readonly unknown[];
-}
-class Database extends Tag("Database")<Database, DatabaseService>() {}
+class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
 
-interface Order {
-  readonly id: string;
-  readonly total: number;
-}
-interface OrderRepository {
-  readonly findById: (id: string) => Order | null;
-}
-class OrderRepo extends Tag("OrderRepo")<OrderRepo, OrderRepository>() {}
+class DatabaseService extends Tag("DatabaseService")<
+  DatabaseService,
+  {
+    readonly query: (sql: string) => readonly unknown[];
+  }
+>() {}
+
+// Order is a domain entity, not a service — it stays a named type.
+type Order = { readonly id: string; readonly total: number };
+
+class OrderRepository extends Tag("OrderRepository")<
+  OrderRepository,
+  {
+    readonly findById: (id: string) => Order | null;
+  }
+>() {}
 
 // --- typed construction errors (unthrown TaggedError) ---
 class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
 
 // --- layers ---
-const LoggerLive = value(Logger, { log: (m) => console.log(`[log] ${m}`) });
+const LoggerLive = value(LoggerService, { log: (m) => console.log(`[log] ${m}`) });
 
 // Sync but FALLIBLE: returns a Result. Its error joins the graph's E channel.
-const ConfigLive = make(AppConfig, (): Result<Config, ConfigError> => {
+const ConfigLive = make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
   const url = "postgres://localhost/app";
   return url.startsWith("postgres://")
     ? Ok({ dbUrl: url })
     : Err(new ConfigError({ reason: "DB_URL must be a postgres:// url" }));
 });
 
-const connectDb = (url: string): Promise<DatabaseService> =>
+const connectDb = (url: string): Promise<ServiceOf<typeof DatabaseService>> =>
   url.includes("localhost")
     ? Promise.resolve({ query: () => [] })
     : Promise.reject(new Error("connection refused"));
 
 // ASYNC and fallible: needs AppConfig. `fromPromise` qualifies the rejection
 // into a modeled ConnectionError.
-const DatabaseLive = make(Database, (ctx: Context<AppConfig>) => {
+const DatabaseLive = make(DatabaseService, (ctx: Context<AppConfig>) => {
   const { dbUrl } = ctx.get(AppConfig);
   return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
 });
 
-// Sync, infallible, but needs Database.
-const OrderRepoLive = factory(OrderRepo, (ctx: Context<Database>) => {
-  const db = ctx.get(Database);
+// Sync, infallible, but needs DatabaseService.
+const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) => {
+  const db = ctx.get(DatabaseService);
   return {
     findById: (id) => (db.query(`select * from orders where id = '${id}'`)[0] as Order) ?? null,
   };
@@ -116,20 +136,20 @@ const OrderRepoLive = factory(OrderRepo, (ctx: Context<Database>) => {
 
 // --- wire the graph ---
 const DatabaseWired = provideTo(DatabaseLive, ConfigLive);
-//    ^? Layer<Database, ConnectionError | ConfigError, never>
+//    ^? Layer<DatabaseService, ConnectionError | ConfigError, never>
 const RepoWired = provideTo(OrderRepoLive, DatabaseWired);
 const AppLayer = merge(merge(LoggerLive, RepoWired), DatabaseWired);
-//    ^? Layer<Logger | OrderRepo | Database, ConnectionError | ConfigError, never>
+//    ^? Layer<LoggerService | OrderRepository | DatabaseService, ConnectionError | ConfigError, never>
 
 // --- build at the edge: the error channel is the STATIC UNION of every
 //     construction failure the graph can produce. Handle it once. ---
 const result = await build(AppLayer);
-//    ^? Result<Context<Logger | OrderRepo | Database>, ConnectionError | ConfigError>
+//    ^? Result<Context<LoggerService | OrderRepository | DatabaseService>, ConnectionError | ConfigError>
 
 const message = result.match({
   ok: (ctx) => {
-    ctx.get(Logger).log("app wired");
-    const order = ctx.get(OrderRepo).findById("order-1");
+    ctx.get(LoggerService).log("app wired");
+    const order = ctx.get(OrderRepository).findById("order-1");
     return `ok: ${order === null ? "no order" : order.id}`;
   },
   err: (e) => (e._tag === "ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`),

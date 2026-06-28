@@ -13,23 +13,38 @@ import {
 } from "./index.js";
 import { Err, fromPromise, fromSafePromise, Ok, type Result, TaggedError } from "unthrown";
 
-// --- service contracts (ports), mirroring example.ts -------------------------
+// Recover a service's shape from its tag when a signature wants it by name.
+type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
 
-type LoggerService = { readonly log: (msg: string) => void };
-class Logger extends Tag("Logger")<Logger, LoggerService>() {}
+// --- service tags (the class IS the tag; the service shape is inlined) -------
 
-type Config = { readonly dbUrl: string };
-class AppConfig extends Tag("AppConfig")<AppConfig, Config>() {}
+class LoggerService extends Tag("LoggerService")<
+  LoggerService,
+  {
+    readonly log: (msg: string) => void;
+  }
+>() {}
 
-type DatabaseService = { readonly query: (sql: string) => readonly unknown[] };
-class Database extends Tag("Database")<Database, DatabaseService>() {}
+class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
 
+class DatabaseService extends Tag("DatabaseService")<
+  DatabaseService,
+  {
+    readonly query: (sql: string) => readonly unknown[];
+  }
+>() {}
+
+// Order is a domain entity, not a service — it stays a named type.
 type Order = { readonly id: string; readonly total: number };
-type OrderRepository = { readonly findById: (id: string) => Order | null };
-class OrderRepo extends Tag("OrderRepo")<OrderRepo, OrderRepository>() {}
 
-type MarkerService = { readonly ok: boolean };
-class Marker extends Tag("Marker")<Marker, MarkerService>() {}
+class OrderRepository extends Tag("OrderRepository")<
+  OrderRepository,
+  {
+    readonly findById: (id: string) => Order | null;
+  }
+>() {}
+
+class Marker extends Tag("Marker")<Marker, { readonly ok: boolean }>() {}
 
 // --- typed construction errors (unthrown TaggedError) ------------------------
 
@@ -37,7 +52,7 @@ class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
 
 // A real driver call: rejects unless the url is local.
-const connectDb = (url: string): Promise<DatabaseService> =>
+const connectDb = (url: string): Promise<ServiceOf<typeof DatabaseService>> =>
   url.includes("localhost")
     ? Promise.resolve({ query: () => [] })
     : Promise.reject(new Error("connection refused"));
@@ -47,23 +62,24 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 describe("happy path: a value + factory + make graph builds to Ok", () => {
   it("builds the wired graph and reads services from the resulting Context", async () => {
     const logs: string[] = [];
-    const LoggerLive = value(Logger, { log: (m) => logs.push(m) });
+    const LoggerLive = value(LoggerService, { log: (m) => logs.push(m) });
 
     // Sync but fallible: returns a Result whose error joins the E channel.
     const ConfigLive = make(
       AppConfig,
-      (): Result<Config, ConfigError> => Ok({ dbUrl: "postgres://localhost/app" }),
+      (): Result<ServiceOf<typeof AppConfig>, ConfigError> =>
+        Ok({ dbUrl: "postgres://localhost/app" }),
     );
 
     // Async and fallible: needs AppConfig; the rejection is qualified.
-    const DatabaseLive = make(Database, (ctx: Context<AppConfig>) => {
+    const DatabaseLive = make(DatabaseService, (ctx: Context<AppConfig>) => {
       const { dbUrl } = ctx.get(AppConfig);
       return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
     });
 
-    // Sync, infallible, but needs Database.
-    const OrderRepoLive = factory(OrderRepo, (ctx: Context<Database>) => {
-      const db = ctx.get(Database);
+    // Sync, infallible, but needs DatabaseService.
+    const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) => {
+      const db = ctx.get(DatabaseService);
       return {
         findById: (id) => (db.query(`select * from orders where id = '${id}'`)[0] as Order) ?? null,
       };
@@ -77,9 +93,9 @@ describe("happy path: a value + factory + make graph builds to Ok", () => {
 
     expect(result.isOk()).toBe(true);
     const ctx = result.unwrap();
-    ctx.get(Logger).log("app wired");
+    ctx.get(LoggerService).log("app wired");
     expect(logs).toEqual(["app wired"]);
-    expect(ctx.get(OrderRepo).findById("order-1")).toBeNull();
+    expect(ctx.get(OrderRepository).findById("order-1")).toBeNull();
     // Note: `ctx.get(AppConfig)` would be a COMPILE error here — AppConfig is
     // consumed by `provideTo` and is not in AppLayer's Provides union.
   });
@@ -89,10 +105,10 @@ describe("error union at the edge", () => {
   it("a failing make resolves build to Err, and .match routes to the err arm", async () => {
     const ConfigLive = make(
       AppConfig,
-      (): Result<Config, ConfigError> =>
+      (): Result<ServiceOf<typeof AppConfig>, ConfigError> =>
         Err(new ConfigError({ reason: "DB_URL must be a postgres:// url" })),
     );
-    const DatabaseLive = make(Database, (ctx: Context<AppConfig>) => {
+    const DatabaseLive = make(DatabaseService, (ctx: Context<AppConfig>) => {
       const { dbUrl } = ctx.get(AppConfig);
       return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
     });
@@ -120,8 +136,8 @@ describe("parallel merge", () => {
   it("builds independent layers concurrently (interleaved by timing)", async () => {
     const order: string[] = [];
 
-    const Slow = make(Logger, () =>
-      fromSafePromise(async (): Promise<LoggerService> => {
+    const Slow = make(LoggerService, () =>
+      fromSafePromise(async () => {
         order.push("slow:start");
         await delay(25);
         order.push("slow:end");
@@ -129,7 +145,7 @@ describe("parallel merge", () => {
       }),
     );
     const Fast = make(AppConfig, () =>
-      fromSafePromise(async (): Promise<Config> => {
+      fromSafePromise(async () => {
         order.push("fast:start");
         await delay(5);
         order.push("fast:end");
@@ -146,10 +162,11 @@ describe("parallel merge", () => {
   });
 
   it("the first Err short-circuits the merge", async () => {
-    const Good = value(Logger, { log: () => {} });
+    const Good = value(LoggerService, { log: () => {} });
     const Bad = make(
       AppConfig,
-      (): Result<Config, ConfigError> => Err(new ConfigError({ reason: "nope" })),
+      (): Result<ServiceOf<typeof AppConfig>, ConfigError> =>
+        Err(new ConfigError({ reason: "nope" })),
     );
 
     const result = await build(merge(Good, Bad));
@@ -159,8 +176,8 @@ describe("parallel merge", () => {
   });
 
   it("a thrown value inside construction becomes a Defect", async () => {
-    const Good = value(Logger, { log: () => {} });
-    const Boom = make(Marker, (): Result<MarkerService, never> => {
+    const Good = value(LoggerService, { log: () => {} });
+    const Boom = make(Marker, (): Result<ServiceOf<typeof Marker>, never> => {
       throw new Error("boom");
     });
 
@@ -172,7 +189,7 @@ describe("parallel merge", () => {
 
 describe("internals: defensive runtime guards", () => {
   it("get throws when a service is absent from the underlying map", async () => {
-    const ctx = (await build(value(Logger, { log: () => {} }))).unwrap();
+    const ctx = (await build(value(LoggerService, { log: () => {} }))).unwrap();
     // Reading a tag NOT in R is a COMPILE error; widen through `unknown` to
     // force the runtime guard (the type system normally makes this unreachable).
     const widened = ctx as unknown as Context<AppConfig>;
@@ -180,7 +197,7 @@ describe("internals: defensive runtime guards", () => {
   });
 
   it("the phantom _R variance marker is a no-op", async () => {
-    const ctx = (await build(value(Logger, { log: () => {} }))).unwrap();
+    const ctx = (await build(value(LoggerService, { log: () => {} }))).unwrap();
     const phantom = (ctx as unknown as { _R: (r: unknown) => void })._R;
     expect(phantom(undefined)).toBeUndefined();
   });
@@ -194,26 +211,24 @@ describe("known limitation — single construction is NOT yet guaranteed", () =>
   it("a shared layer is built once per branch (currently 2)", async () => {
     let constructions = 0;
 
-    const Shared = make(AppConfig, (): Result<Config, never> => {
+    const Shared = make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, never> => {
       constructions += 1;
       return Ok({ dbUrl: "postgres://localhost/app" });
     });
 
-    type AService = { readonly a: string };
-    class TagA extends Tag("TagA")<TagA, AService>() {}
-    type BService = { readonly b: string };
-    class TagB extends Tag("TagB")<TagB, BService>() {}
+    class ServiceA extends Tag("ServiceA")<ServiceA, { readonly a: string }>() {}
+    class ServiceB extends Tag("ServiceB")<ServiceB, { readonly b: string }>() {}
 
-    const UsesConfigA = factory(TagA, (ctx: Context<AppConfig>) => ({
+    const UsesConfigA = factory(ServiceA, (ctx: Context<AppConfig>) => ({
       a: ctx.get(AppConfig).dbUrl,
     }));
-    const UsesConfigB = factory(TagB, (ctx: Context<AppConfig>) => ({
+    const UsesConfigB = factory(ServiceB, (ctx: Context<AppConfig>) => ({
       b: ctx.get(AppConfig).dbUrl,
     }));
 
     const BranchA = provideTo(UsesConfigA, Shared);
     const BranchB = provideTo(UsesConfigB, Shared);
-    const App: Layer<TagA | TagB, never, never> = merge(BranchA, BranchB);
+    const App: Layer<ServiceA | ServiceB, never, never> = merge(BranchA, BranchB);
 
     const result = await build(App);
 

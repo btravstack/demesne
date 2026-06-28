@@ -17,60 +17,60 @@ type Equal<X, Y> =
   (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 type Expect<T extends true> = T;
 
-// --- fixtures ----------------------------------------------------------------
+// --- fixtures (inline tags: the class IS the tag, shape inlined) --------------
 
-type AService = { readonly a: string };
-class TagA extends Tag("TagA")<TagA, AService>() {}
-type BService = { readonly b: number };
-class TagB extends Tag("TagB")<TagB, BService>() {}
+class ServiceA extends Tag("ServiceA")<ServiceA, { readonly a: string }>() {}
+class ServiceB extends Tag("ServiceB")<ServiceB, { readonly b: number }>() {}
 
 class EA extends TaggedError("EA")<{ x: number }> {}
 class EB extends TaggedError("EB")<{ y: string }> {}
 
 // --- 1. Reading an absent service is a type error ----------------------------
 
-declare const ctxA: Context<TagA>;
+declare const ctxA: Context<ServiceA>;
 
-const readA = ctxA.get(TagA);
-type _readA = Expect<Equal<typeof readA, AService>>;
+const readA = ctxA.get(ServiceA);
+type _readA = Expect<Equal<typeof readA, { readonly a: string }>>;
 
-// @ts-expect-error - TagB is not in this context's R, so `get` must reject it.
-ctxA.get(TagB);
+// @ts-expect-error - ServiceB is not in this context's R, so `get` must reject it.
+ctxA.get(ServiceB);
 
 // --- 2. Un-wired requirements block `build` ----------------------------------
 
 // A fully-wired layer (Needs = never) builds, yielding the carried error union.
-declare const wired: Layer<TagA, EA, never>;
+declare const wired: Layer<ServiceA, EA, never>;
 const built = build(wired);
-type _built = Expect<Equal<typeof built, AsyncResult<Context<TagA>, EA>>>;
+type _built = Expect<Equal<typeof built, AsyncResult<Context<ServiceA>, EA>>>;
 
-// A layer that still needs TagA is NOT accepted by `build` (Needs must be never).
-declare const unwired: Layer<TagB, never, TagA>;
-// @ts-expect-error - `build` requires Needs = never; TagA is still unmet.
+// A layer that still needs ServiceA is NOT accepted by `build` (Needs must be never).
+declare const unwired: Layer<ServiceB, never, ServiceA>;
+// @ts-expect-error - `build` requires Needs = never; ServiceA is still unmet.
 build(unwired);
 
 // --- 3. The error channel is the real union, not `any` -----------------------
 
-const layerA = make(TagA, (): Result<AService, EA> => Ok({ a: "x" }));
-const layerB = make(TagB, (): Result<BService, EB> => Ok({ b: 1 }));
+const layerA = make(ServiceA, (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }));
+const layerB = make(ServiceB, (): Result<{ readonly b: number }, EB> => Ok({ b: 1 }));
 const graph = merge(layerA, layerB);
 
 const graphResult = build(graph);
-type _graphResult = Expect<Equal<typeof graphResult, AsyncResult<Context<TagA | TagB>, EA | EB>>>;
+type _graphResult = Expect<
+  Equal<typeof graphResult, AsyncResult<Context<ServiceA | ServiceB>, EA | EB>>
+>;
 
 // The union cannot be narrowed to a single arm: EA alone does not absorb EB.
 // @ts-expect-error - the error channel is EA | EB, not EA alone.
-const narrowed: AsyncResult<Context<TagA | TagB>, EA> = graphResult;
+const narrowed: AsyncResult<Context<ServiceA | ServiceB>, EA> = graphResult;
 void narrowed;
 
 // --- 4. Context is contravariant in R ----------------------------------------
 
-declare const rich: Context<TagA | TagB>;
-const wantsA = (_: Context<TagA>): void => {};
+declare const rich: Context<ServiceA | ServiceB>;
+const wantsA = (_: Context<ServiceA>): void => {};
 // A richer context satisfies a consumer asking for fewer services.
 wantsA(rich);
 
-declare const poor: Context<TagA>;
-const wantsAB = (_: Context<TagA | TagB>): void => {};
-// @ts-expect-error - a Context<TagA> cannot satisfy a consumer needing TagA | TagB.
+declare const poor: Context<ServiceA>;
+const wantsAB = (_: Context<ServiceA | ServiceB>): void => {};
+// @ts-expect-error - a Context<ServiceA> cannot satisfy a consumer needing ServiceA | ServiceB.
 wantsAB(poor);

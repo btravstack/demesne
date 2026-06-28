@@ -45,7 +45,7 @@ error channel of a merged graph is exactly `EA | EB`, not narrowable to one arm.
 
 Without a monad there is no `R` channel threaded through every call. Instead a
 consumer **declares the ports it needs** in its `Context<R>` signature
-(`factory(OrderRepo, (ctx: Context<Database>) => …)`). This is the deliberate trade
+(`factory(OrderRepository, (ctx: Context<DatabaseService>) => …)`). This is the deliberate trade
 versus Effect's inferred `R`: for hexagonal / DDD code, an explicit port list at the
 boundary is a _feature_, not a limitation. Do not try to infer `Needs` from `ctx.get`
 calls inside a factory body.
@@ -57,6 +57,27 @@ from a class plus a literal `Id` string; the constructor returns a distinct
 `TagInstance<Id, Service>` (**not** `Self`) so that `class X extends Tag("X")<X, S>()`
 is legal without the class referencing itself as a base type. The literal `Id` keeps
 instance types nominal. _(Guarded by: reading an absent tag is a compile error.)_
+
+**Definition convention — inline the shape; the class IS the tag.** Prefer a single
+declaration with the service shape inlined over a separate `interface` + short tag
+class:
+
+```ts
+class LoggerService extends Tag("LoggerService")<
+  LoggerService,
+  {
+    readonly log: (msg: string) => void;
+  }
+>() {}
+```
+
+This is exactly the self-referential form the `TagInstance` trick exists to permit.
+The consequence is that the identifier names the **tag**, not the service shape — so
+domain entities (e.g. `Order`) stay named types, and any signature that needs a
+service's shape by name recovers it with
+`type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never` (definable in
+userland, since `Tag` is exported). Do **not** reintroduce a parallel `interface` per
+service.
 
 ### 4. `Layer.build` is a property, not a method — NEVER change this
 

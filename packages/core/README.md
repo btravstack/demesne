@@ -10,17 +10,18 @@ pnpm add demesne unthrown
 ```
 
 ```ts
-import { build, type Context, make, provideTo, Tag, value } from "demesne";
+import { build, make, Tag } from "demesne";
 import { Err, Ok, type Result, TaggedError } from "unthrown";
 
-interface Config {
-  readonly dbUrl: string;
-}
-class AppConfig extends Tag("AppConfig")<AppConfig, Config>() {}
+// The class IS the tag; the service shape is inlined.
+class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
+
+// Recover the inlined shape by name when a signature wants it.
+type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
 
 class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 
-const ConfigLive = make(AppConfig, (): Result<Config, ConfigError> => {
+const ConfigLive = make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
   const url = "postgres://localhost/app";
   return url.startsWith("postgres://")
     ? Ok({ dbUrl: url })
