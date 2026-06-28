@@ -1,0 +1,43 @@
+autoInstallPeers: false
+dedupePeerDependents: true
+engineStrict: true
+saveExact: true
+strictPeerDependencies: true
+
+packages:
+  - packages/*
+  - tools/*
+
+catalog:
+  "@changesets/cli": 2.31.0
+  "@commitlint/cli": 21.0.2
+  "@commitlint/config-conventional": 21.0.2
+  "@types/node": 24.13.2
+  "@vitest/coverage-v8": 4.1.8
+  knip: 6.16.1
+  lefthook: 2.1.9
+  oxfmt: 0.54.0
+  oxlint: 1.69.0
+  tsdown: 0.22.2
+  turbo: 2.9.18
+  typedoc: 0.28.19
+  typedoc-plugin-markdown: 4.12.0
+  typescript: 6.0.3
+  unthrown: 1.0.0
+  vitest: 4.1.8
+
+allowBuilds:
+  esbuild: true
+  lefthook: true
+
+# Supply-chain maturity delay: don't adopt a freshly published version until it
+# has been on the registry for 7 days (10080 minutes). Strict mode also validates
+# the committed lockfile against this cutoff, so a same-day-published transitive
+# dep fails the check instead of slipping in silently.
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
+# `unthrown` is demesne's own peer dependency and ships from the sibling repo on
+# the same cadence; its 1.0.0 is newer than the 7-day window. Exclude it from the
+# maturity delay so the peer resolves, while the delay still guards everything else.
+minimumReleaseAgeExclude:
+  - unthrown
