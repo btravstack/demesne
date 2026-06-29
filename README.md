@@ -67,7 +67,7 @@ Constructors, by how construction is qualified:
 
 ```ts
 import { build, type Context, factory, make, merge, provideTo, Tag, value } from "demesne";
-import { Err, fromPromise, Ok, type Result, TaggedError } from "unthrown";
+import { type AsyncResult, Err, fromPromise, Ok, type Result, TaggedError } from "unthrown";
 
 // Recover a service's shape from its tag when a signature wants it by name.
 type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
@@ -92,16 +92,21 @@ class DatabaseService extends Tag("DatabaseService")<
 // Order is a domain entity, not a service — it stays a named type.
 type Order = { readonly id: string; readonly total: number };
 
+// A service's own operations are unthrown results too: findById does an async,
+// fallible lookup, so it returns an AsyncResult — not a bare `Order | null`.
 class OrderRepository extends Tag("OrderRepository")<
   OrderRepository,
   {
-    readonly findById: (id: string) => Order | null;
+    readonly findById: (id: string) => AsyncResult<Order, OrderNotFound>;
   }
 >() {}
 
-// --- typed construction errors (unthrown TaggedError) ---
+// --- typed errors (unthrown TaggedError) ---
+// Construction errors (wiring) ...
 class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
+// ... and an operation error a wired service can return.
+class OrderNotFound extends TaggedError("OrderNotFound")<{ id: string }> {}
 
 // --- layers ---
 const LoggerLive = value(LoggerService, { log: (m) => console.log(`[log] ${m}`) });
@@ -126,11 +131,15 @@ const DatabaseLive = make(DatabaseService, (ctx: Context<AppConfig>) => {
   return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
 });
 
-// Sync, infallible, but needs DatabaseService.
+// The FACTORY is sync + infallible (it just assembles the repo), but the repo's
+// findById returns an AsyncResult carrying a modeled OrderNotFound.
 const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) => {
   const db = ctx.get(DatabaseService);
   return {
-    findById: (id) => (db.query(`select * from orders where id = '${id}'`)[0] as Order) ?? null,
+    findById: (id) => {
+      const row = db.query(`select * from orders where id = '${id}'`)[0] as Order | undefined;
+      return (row ? Ok(row) : Err(new OrderNotFound({ id }))).toAsync();
+    },
   };
 });
 
@@ -141,20 +150,30 @@ const RepoWired = provideTo(OrderRepoLive, DatabaseWired);
 const AppLayer = merge(merge(LoggerLive, RepoWired), DatabaseWired);
 //    ^? Layer<LoggerService | OrderRepository | DatabaseService, ConnectionError | ConfigError, never>
 
-// --- build at the edge: the error channel is the STATIC UNION of every
+// --- build at the edge: the WIRING error channel is the STATIC UNION of every
 //     construction failure the graph can produce. Handle it once. ---
-const result = await build(AppLayer);
+const wiring = await build(AppLayer);
 //    ^? Result<Context<LoggerService | OrderRepository | DatabaseService>, ConnectionError | ConfigError>
 
-const message = result.match({
-  ok: (ctx) => {
-    ctx.get(LoggerService).log("app wired");
-    const order = ctx.get(OrderRepository).findById("order-1");
-    return `ok: ${order === null ? "no order" : order.id}`;
-  },
-  err: (e) => (e._tag === "ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`),
-  defect: (cause) => `panic: ${String(cause)}`,
-});
+if (wiring.isOk()) {
+  const ctx = wiring.unwrap();
+  ctx.get(LoggerService).log("app wired");
+
+  // One level down: a service OPERATION is itself an unthrown AsyncResult —
+  // await it and handle its own error union the same way.
+  const message = await ctx
+    .get(OrderRepository)
+    .findById("order-1")
+    .match({
+      ok: (order) => `found order ${order.id}`,
+      err: (notFound) => `no such order: ${notFound.id}`,
+      defect: (cause) => `query panicked: ${String(cause)}`,
+    });
+  console.log(message);
+} else {
+  const e = wiring.unwrapErr();
+  console.error(e._tag === "ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`);
+}
 ```
 
 Forget to wire `ConfigLive`, and `build(AppLayer)` is a **compile error** — `Needs`
@@ -192,7 +211,7 @@ the boundary-declared style demesne favours.
 ```ts
 import { build, type Context, make, provideTo, Tag, value } from "demesne";
 import { fromSchema, type SchemaIssues } from "@unthrown/standard-schema";
-import { TaggedError } from "unthrown";
+import { type Result, TaggedError } from "unthrown";
 import { z } from "zod"; // any Standard Schema validator (zod / valibot / arktype)
 
 // The raw environment is a provided port.

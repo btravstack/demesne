@@ -11,7 +11,15 @@ import {
   Tag,
   value,
 } from "./index.js";
-import { Err, fromPromise, fromSafePromise, Ok, type Result, TaggedError } from "unthrown";
+import {
+  type AsyncResult,
+  Err,
+  fromPromise,
+  fromSafePromise,
+  Ok,
+  type Result,
+  TaggedError,
+} from "unthrown";
 
 // Recover a service's shape from its tag when a signature wants it by name.
 type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
@@ -37,19 +45,22 @@ class DatabaseService extends Tag("DatabaseService")<
 // Order is a domain entity, not a service — it stays a named type.
 type Order = { readonly id: string; readonly total: number };
 
+// A service's own operations are unthrown results too: findById returns an
+// AsyncResult, not a bare `Order | null`.
 class OrderRepository extends Tag("OrderRepository")<
   OrderRepository,
   {
-    readonly findById: (id: string) => Order | null;
+    readonly findById: (id: string) => AsyncResult<Order, OrderNotFound>;
   }
 >() {}
 
 class Marker extends Tag("Marker")<Marker, { readonly ok: boolean }>() {}
 
-// --- typed construction errors (unthrown TaggedError) ------------------------
+// --- typed errors (unthrown TaggedError) -------------------------------------
 
 class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
+class OrderNotFound extends TaggedError("OrderNotFound")<{ id: string }> {}
 
 // A real driver call: rejects unless the url is local.
 const connectDb = (url: string): Promise<ServiceOf<typeof DatabaseService>> =>
@@ -77,11 +88,15 @@ describe("happy path: a value + factory + make graph builds to Ok", () => {
       return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
     });
 
-    // Sync, infallible, but needs DatabaseService.
+    // The factory is sync + infallible; the repo's findById returns an
+    // AsyncResult carrying a modeled OrderNotFound.
     const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) => {
       const db = ctx.get(DatabaseService);
       return {
-        findById: (id) => (db.query(`select * from orders where id = '${id}'`)[0] as Order) ?? null,
+        findById: (id) => {
+          const row = db.query(`select * from orders where id = '${id}'`)[0] as Order | undefined;
+          return (row ? Ok(row) : Err(new OrderNotFound({ id }))).toAsync();
+        },
       };
     });
 
@@ -95,7 +110,10 @@ describe("happy path: a value + factory + make graph builds to Ok", () => {
     const ctx = result.unwrap();
     ctx.get(LoggerService).log("app wired");
     expect(logs).toEqual(["app wired"]);
-    expect(ctx.get(OrderRepository).findById("order-1")).toBeNull();
+    // A service operation is itself an unthrown AsyncResult — await and inspect it.
+    const found = await ctx.get(OrderRepository).findById("order-1");
+    expect(found.isErr()).toBe(true);
+    expect(found.unwrapErr()).toBeInstanceOf(OrderNotFound);
     // Note: `ctx.get(AppConfig)` would be a COMPILE error here — AppConfig is
     // consumed by `provideTo` and is not in AppLayer's Provides union.
   });
