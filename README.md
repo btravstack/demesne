@@ -65,14 +65,21 @@ Constructors, by how construction is qualified:
 
 ## Example
 
+A small graph — a logger, config, a database connection, and an order repository —
+built in five steps. Everything below is one program; it's split only to walk through it.
+
+### 1. Define the services (ports)
+
+The class **is** the tag; inline the service shape. A service's own operations are
+unthrown results too, so `findById` returns an `AsyncResult` rather than `Order | null`.
+
 ```ts
-import { build, type Context, factory, make, merge, provideTo, Tag, value } from "demesne";
-import { type AsyncResult, Err, fromPromise, Ok, type Result, TaggedError } from "unthrown";
+import { Tag } from "demesne";
+import { type AsyncResult } from "unthrown";
 
 // Recover a service's shape from its tag when a signature wants it by name.
 type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
 
-// --- service tags (the class IS the tag; the service shape is inlined) ---
 class LoggerService extends Tag("LoggerService")<
   LoggerService,
   {
@@ -92,26 +99,42 @@ class DatabaseService extends Tag("DatabaseService")<
 // Order is a domain entity, not a service — it stays a named type.
 type Order = { readonly id: string; readonly total: number };
 
-// A service's own operations are unthrown results too: findById does an async,
-// fallible lookup, so it returns an AsyncResult — not a bare `Order | null`.
 class OrderRepository extends Tag("OrderRepository")<
   OrderRepository,
   {
     readonly findById: (id: string) => AsyncResult<Order, OrderNotFound>;
   }
 >() {}
+```
 
-// --- typed errors (unthrown TaggedError) ---
-// Construction errors (wiring) ...
+### 2. Model the errors
+
+Two kinds: failures that can happen while **wiring** (construction), and a failure a
+**wired service** can return from an operation.
+
+```ts
+import { TaggedError } from "unthrown";
+
+// Construction (wiring) errors ...
 class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
 // ... and an operation error a wired service can return.
 class OrderNotFound extends TaggedError("OrderNotFound")<{ id: string }> {}
+```
 
-// --- layers ---
+### 3. Write the layers
+
+One constructor per construction qualification: `value` (ready), `factory` (sync,
+infallible), `make` (fallible and/or async).
+
+```ts
+import { factory, make, value, type Context } from "demesne";
+import { Err, fromPromise, Ok, type Result } from "unthrown";
+
+// value: a ready service — needs nothing, cannot fail.
 const LoggerLive = value(LoggerService, { log: (m) => console.log(`[log] ${m}`) });
 
-// Sync but FALLIBLE: returns a Result. Its error joins the graph's E channel.
+// make: sync but FALLIBLE — returns a Result; its error joins the E channel.
 const ConfigLive = make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
   const url = "postgres://localhost/app";
   return url.startsWith("postgres://")
@@ -119,20 +142,19 @@ const ConfigLive = make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, Confi
     : Err(new ConfigError({ reason: "DB_URL must be a postgres:// url" }));
 });
 
+// make: ASYNC and fallible — needs AppConfig; fromPromise qualifies the rejection.
 const connectDb = (url: string): Promise<ServiceOf<typeof DatabaseService>> =>
   url.includes("localhost")
     ? Promise.resolve({ query: () => [] })
     : Promise.reject(new Error("connection refused"));
 
-// ASYNC and fallible: needs AppConfig. `fromPromise` qualifies the rejection
-// into a modeled ConnectionError.
 const DatabaseLive = make(DatabaseService, (ctx: Context<AppConfig>) => {
   const { dbUrl } = ctx.get(AppConfig);
   return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
 });
 
-// The FACTORY is sync + infallible (it just assembles the repo), but the repo's
-// findById returns an AsyncResult carrying a modeled OrderNotFound.
+// factory: the factory itself is sync + infallible (it just assembles the repo),
+// but the repo's findById returns an AsyncResult carrying a modeled OrderNotFound.
 const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) => {
   const db = ctx.get(DatabaseService);
   return {
@@ -142,16 +164,32 @@ const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) =
     },
   };
 });
+```
 
-// --- wire the graph ---
+### 4. Wire the graph
+
+`provideTo` feeds one layer into another and **discharges** the shared requirement;
+`merge` combines independent layers. Requirements and errors accumulate as unions.
+
+```ts
+import { merge, provideTo } from "demesne";
+
 const DatabaseWired = provideTo(DatabaseLive, ConfigLive);
 //    ^? Layer<DatabaseService, ConnectionError | ConfigError, never>
 const RepoWired = provideTo(OrderRepoLive, DatabaseWired);
 const AppLayer = merge(merge(LoggerLive, RepoWired), DatabaseWired);
 //    ^? Layer<LoggerService | OrderRepository | DatabaseService, ConnectionError | ConfigError, never>
+```
 
-// --- build at the edge: the WIRING error channel is the STATIC UNION of every
-//     construction failure the graph can produce. Handle it once. ---
+### 5. Build at the edge
+
+`build` is callable only once `Needs` is `never`. You then handle **two distinct
+unthrown results**: the wiring union from `build`, and — one level down — each service
+operation's own union.
+
+```ts
+import { build } from "demesne";
+
 const wiring = await build(AppLayer);
 //    ^? Result<Context<LoggerService | OrderRepository | DatabaseService>, ConnectionError | ConfigError>
 
@@ -159,8 +197,8 @@ if (wiring.isOk()) {
   const ctx = wiring.unwrap();
   ctx.get(LoggerService).log("app wired");
 
-  // One level down: a service OPERATION is itself an unthrown AsyncResult —
-  // await it and handle its own error union the same way.
+  // A service operation is itself an unthrown AsyncResult — await it and handle
+  // its own error union the same way.
   const message = await ctx
     .get(OrderRepository)
     .findById("order-1")
