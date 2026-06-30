@@ -1,7 +1,6 @@
-// Composition root — the one place adapters are bound to ports AND the only place the
-// Context appears. Wire with Layer.provideTo / Layer.merge, Layer.build once at the edge
-// (handling every wiring failure as a static union), then resolve the ports from the
-// built Context and hand them to the use case's constructor.
+// Composition root — bind adapters to ports, then wire the application layer on top.
+// `Layer.build` runs the whole graph once at the edge; you resolve a use case from the
+// built context and call `execute`. No manual construction.
 
 import { Layer } from "demesne";
 
@@ -9,24 +8,25 @@ import { ConfigLive } from "./adapters/config.js";
 import { DatabaseLive } from "./adapters/database.js";
 import { LoggerLive } from "./adapters/logger.js";
 import { OrderRepoLive } from "./adapters/order-repository.js";
-import { GetOrder } from "./application/get-order.js";
-import { Logger, OrderRepository } from "./application/ports.js";
+import { GetOrder, GetOrderLive } from "./application/get-order.js";
 
+// Infrastructure — adapters wired to their ports.
 const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
 const OrderRepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
-const AppLayer = Layer.merge(LoggerLive, OrderRepoWired);
+const ServicesLayer = Layer.merge(LoggerLive, OrderRepoWired);
 //    ^? Layer<Logger | OrderRepository, ConnectionError | ConfigError, never>
 
+// Application — use cases, each constructor-injected from the services. The built
+// context exposes only the use cases; the infrastructure ports stay hidden.
+const AppLayer = Layer.provideTo(GetOrderLive, ServicesLayer);
+//    ^? Layer<GetOrder, ConnectionError | ConfigError, never>
+
 const wiring = await Layer.build(AppLayer);
-//    ^? Result<Context<Logger | OrderRepository>, ConnectionError | ConfigError>
+//    ^? Result<Context<GetOrder>, ConnectionError | ConfigError>
 
 if (wiring.isOk()) {
-  const ctx = wiring.unwrap();
-  // Constructor injection: resolve the ports the use case needs and `new` it up.
-  // `ctx.get` is type-checked — a port the graph didn't provide is a compile error.
-  const getOrder = new GetOrder(ctx.get(Logger), ctx.get(OrderRepository));
-
-  const order = await getOrder.execute("order-1");
+  // Resolve the wired use case and run it — demesne already injected its ports.
+  const order = await wiring.unwrap().get(GetOrder).execute("order-1");
   console.log(
     order.match({
       ok: (o) => `order ${o.id}: ${o.total}`,

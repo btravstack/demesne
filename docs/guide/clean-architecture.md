@@ -49,18 +49,20 @@ export class OrderRepository extends Tag("OrderRepository")<OrderRepository, {
 
 ## Application
 
-A use case. Dependencies are injected through the **constructor**; its only public
-method is **`execute`**. The signature says exactly what the use case asks for and
-returns — the DI container never leaks in. The use case imports no `Context`, no
-`Layer`, no demesne at all; it depends only on the port _shapes_ (recovered with
-`ServiceOf`).
+A use case, **wired by demesne**. The implementation is a class with constructor-injected
+ports and a single public `execute` method — it uses no demesne types, so its signature
+says only what it asks for and returns. A `Layer.factory` performs the constructor
+injection, so the use case joins the typed graph: `Layer.build` won't compile until its
+ports are wired, and the rest of the app resolves it with `ctx.get(GetOrder)`.
 
 ```ts
 // application/get-order.ts
+import { type Context, Layer, Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 import { Logger, OrderRepository, type ServiceOf } from "./ports.js";
 
-export class GetOrder {
+// The use case logic — constructor DI, one public method, framework-agnostic.
+class GetOrderInteractor {
   constructor(
     private readonly logger: ServiceOf<typeof Logger>,
     private readonly orders: ServiceOf<typeof OrderRepository>,
@@ -71,13 +73,24 @@ export class GetOrder {
     return this.orders.findById(id);
   }
 }
+
+// The use case as a port other code resolves from the context.
+export class GetOrder extends Tag("GetOrder")<GetOrder, GetOrderInteractor>() {}
+
+// The application layer: constructor injection performed inside a factory.
+export const GetOrderLive = Layer.factory(
+  GetOrder,
+  (ctx: Context<Logger | OrderRepository>) =>
+    new GetOrderInteractor(ctx.get(Logger), ctx.get(OrderRepository)),
+);
 ```
 
-::: tip Why not pass the `Context`?
-Taking `ctx: Context<…>` as a first argument mixes the use case's _input_ with its
-_dependencies_ and couples the application layer to demesne. Constructor injection keeps
-`execute(input)` clean and the use case framework-agnostic — `new GetOrder(fakeLogger,
-fakeOrders)` is all you need to test it.
+::: tip Constructor injection, not a `Context` argument
+Taking `ctx: Context<…>` as a first argument of `execute` would mix the use case's
+_input_ with its _dependencies_ and couple the application logic to demesne. Keeping the
+ports in the **constructor** leaves `execute(input)` clean and the interactor
+framework-agnostic — `new GetOrderInteractor(fakeLogger, fakeOrders)` is all you need to
+test it. The `Layer.factory` is the only seam that knows about the `Context`.
 :::
 
 ## Adapters
@@ -132,29 +145,31 @@ const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<Database>) =>
 
 ## Composition root
 
-The one place adapters are bound to ports **and the only place the `Context` appears**.
-Wire, `Layer.build` once at the edge (handling every **wiring** failure as a static
-union), then resolve the ports from the built `Context` and hand them to the use case's
-constructor.
+Bind adapters to ports, then wire the **application layer** of use cases on top.
+`Layer.build` runs the whole graph once at the edge (handling every **wiring** failure as
+a static union); you then resolve a use case from the built context and call `execute`.
+The built context exposes only the use cases — the infrastructure stays hidden.
 
 ```ts
 // main.ts
 import { Layer } from "demesne";
 
+// Infrastructure — adapters wired to their ports.
 const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
 const OrderRepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
-const AppLayer = Layer.merge(LoggerLive, OrderRepoWired);
+const ServicesLayer = Layer.merge(LoggerLive, OrderRepoWired);
 //    ^? Layer<Logger | OrderRepository, ConnectionError | ConfigError, never>
 
+// Application — use cases, constructor-injected from the services.
+const AppLayer = Layer.provideTo(GetOrderLive, ServicesLayer);
+//    ^? Layer<GetOrder, ConnectionError | ConfigError, never>
+
 const wiring = await Layer.build(AppLayer);
+//    ^? Result<Context<GetOrder>, ConnectionError | ConfigError>
 
 if (wiring.isOk()) {
-  const ctx = wiring.unwrap();
-  // Constructor injection: resolve the ports the use case needs and `new` it up.
-  // `ctx.get` is type-checked — a port the graph didn't provide is a compile error.
-  const getOrder = new GetOrder(ctx.get(Logger), ctx.get(OrderRepository));
-
-  const order = await getOrder.execute("order-1");
+  // Resolve the wired use case and run it — demesne already injected its ports.
+  const order = await wiring.unwrap().get(GetOrder).execute("order-1");
   console.log(
     order.match({
       ok: (o) => `order ${o.id}: ${o.total}`,
