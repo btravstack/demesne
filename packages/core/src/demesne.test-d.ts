@@ -8,7 +8,7 @@
 // the core was designed for: absent reads fail, un-wired requirements block
 // `build`, the error channel is the real union, and `Context` is contravariant.
 
-import { type Context, Layer, Tag } from "./index.js";
+import { type Context, Layer, type ServiceOf, Tag } from "./index.js";
 import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
 
 // --- assertion helpers -------------------------------------------------------
@@ -36,6 +36,10 @@ type _readA = Expect<Equal<typeof readA, { readonly a: string }>>;
 
 // @ts-expect-error - ServiceB is not in this context's R, so `get` must reject it.
 ctxA.get(ServiceB);
+
+// `ServiceOf` recovers the shape — from the instance type AND from `typeof tag`.
+type _serviceOfInstance = Expect<Equal<ServiceOf<ServiceA>, { readonly a: string }>>;
+type _serviceOfTypeof = Expect<Equal<ServiceOf<typeof ServiceA>, { readonly a: string }>>;
 
 // --- 2. Un-wired requirements block `build` ----------------------------------
 

@@ -52,6 +52,17 @@ export const Tag =
     return cls as unknown as TagClass<Self, Id, Service>;
   };
 
+// Recover a tag's service shape. The tag type is the nominal identity that appears
+// in `R` — deliberately NOT the service — so a signature that needs the shape by
+// name (a constructor parameter, a port type) recovers it here. Accepts either the
+// tag instance type (`ServiceOf<Logger>`) or the tag value's type
+// (`ServiceOf<typeof Logger>`).
+export type ServiceOf<T> = T extends Tag<unknown, infer S>
+  ? S
+  : T extends TagInstance<string, infer S>
+    ? S
+    : never;
+
 // ---------------------------------------------------------------------------
 // Context<R> — immutable map Tag -> Service. `get` only accepts a tag whose
 // identity is in R (reading an absent service is a compile error). Contravariant

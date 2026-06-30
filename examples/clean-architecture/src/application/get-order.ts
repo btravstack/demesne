@@ -3,17 +3,17 @@
 // types. A `Layer.factory` performs the constructor injection, so the use case joins
 // the typed graph: `Layer.build` won't compile until its ports are wired.
 
-import { type Context, Layer, Tag } from "demesne";
+import { type Context, Layer, type ServiceOf, Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 
 import type { Order, OrderNotFound } from "../domain/order.js";
-import { Logger, OrderRepository, type ServiceOf } from "./ports.js";
+import { Logger, OrderRepository } from "./ports.js";
 
 // The use case logic — constructor DI, one public method, framework-agnostic.
 class GetOrderInteractor {
   constructor(
-    private readonly logger: ServiceOf<typeof Logger>,
-    private readonly orders: ServiceOf<typeof OrderRepository>,
+    private readonly logger: ServiceOf<Logger>,
+    private readonly orders: ServiceOf<OrderRepository>,
   ) {}
 
   execute(id: string): AsyncResult<Order, OrderNotFound> {

@@ -36,8 +36,6 @@ import { Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 import type { Order, OrderNotFound } from "../domain/order.js";
 
-export type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
-
 export class Logger extends Tag("Logger")<Logger, {
   readonly log: (msg: string) => void;
 }>() {}
@@ -57,15 +55,15 @@ ports are wired, and the rest of the app resolves it with `ctx.get(GetOrder)`.
 
 ```ts
 // application/get-order.ts
-import { type Context, Layer, Tag } from "demesne";
+import { type Context, Layer, type ServiceOf, Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
-import { Logger, OrderRepository, type ServiceOf } from "./ports.js";
+import { Logger, OrderRepository } from "./ports.js";
 
 // The use case logic — constructor DI, one public method, framework-agnostic.
 class GetOrderInteractor {
   constructor(
-    private readonly logger: ServiceOf<typeof Logger>,
-    private readonly orders: ServiceOf<typeof OrderRepository>,
+    private readonly logger: ServiceOf<Logger>,
+    private readonly orders: ServiceOf<OrderRepository>,
   ) {}
 
   execute(id: string): AsyncResult<Order, OrderNotFound> {
@@ -100,10 +98,10 @@ Its own plumbing tags (`AppConfig`, `Database`) and infrastructure errors live h
 
 ```ts
 // adapters/*.ts
-import { type Context, Layer, Tag } from "demesne";
+import { type Context, Layer, type ServiceOf, Tag } from "demesne";
 import { Err, fromPromise, Ok, TaggedError } from "unthrown";
 import { type Order, OrderNotFound } from "../domain/order.js";
-import { Logger, OrderRepository, type ServiceOf } from "../application/ports.js";
+import { Logger, OrderRepository } from "../application/ports.js";
 
 class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
 class Database extends Tag("Database")<Database, {
@@ -122,7 +120,7 @@ const ConfigLive = Layer.make(AppConfig, () => {
     : Err(new ConfigError({ reason: "DATABASE_URL must be a postgres:// url" }));
 });
 
-const connectDb = (url: string): Promise<ServiceOf<typeof Database>> =>
+const connectDb = (url: string): Promise<ServiceOf<Database>> =>
   url.includes("localhost")
     ? Promise.resolve({ query: () => [] })
     : Promise.reject(new Error("connection refused"));

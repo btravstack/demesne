@@ -18,13 +18,16 @@ class Logger extends Tag("Logger")<Logger, {
 }>() {}
 ```
 
-The identifier now names the **tag**, not the service shape. When a signature needs the
-shape by name, recover it with a one-line helper (no separate `interface` required,
-since `Tag` is exported):
+The identifier now names the **tag** (its nominal identity in `R`), **not** the service
+shape — the tag type is deliberately distinct so two structurally identical services
+never collide. When a signature needs the shape by name (a constructor parameter, a port
+type), recover it with the exported **`ServiceOf`** helper — it accepts the tag instance
+type or `typeof tag`:
 
 ```ts
-type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
-type LoggerService = ServiceOf<typeof Logger>; // { readonly log: (msg: string) => void }
+import { type ServiceOf } from "demesne";
+
+type LoggerService = ServiceOf<Logger>; // { readonly log: (msg: string) => void }
 ```
 
 ::: tip Domain entities stay named

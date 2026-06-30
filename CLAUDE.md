@@ -72,12 +72,13 @@ class LoggerService extends Tag("LoggerService")<
 ```
 
 This is exactly the self-referential form the `TagInstance` trick exists to permit.
-The consequence is that the identifier names the **tag**, not the service shape — so
-domain entities (e.g. `Order`) stay named types, and any signature that needs a
-service's shape by name recovers it with
-`type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never` (definable in
-userland, since `Tag` is exported). Do **not** reintroduce a parallel `interface` per
-service.
+The consequence is that the identifier names the **tag** (its nominal identity in `R`),
+not the service shape — so domain entities (e.g. `Order`) stay named types, and any
+signature that needs a service's shape by name recovers it with the exported
+**`ServiceOf<T>`** helper (it accepts the tag instance type, `ServiceOf<Logger>`, or
+`typeof tag`). The tag type being distinct from the service shape is load-bearing for
+nominal identity — do **not** make the tag usable directly as the service, and do
+**not** reintroduce a parallel `interface` per service.
 
 ### 4. The `Layer` type's `build` member is a property, not a method — NEVER change this
 

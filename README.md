@@ -47,9 +47,9 @@ Three concepts:
   >() {}
   ```
 
-  The identifier now names the tag, not the shape; recover the shape by name with
-  `type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never` when a signature
-  needs it.
+  The identifier now names the tag (its nominal identity in `R`), **not** the service
+  shape. When a signature needs the shape by name, recover it with the exported
+  `ServiceOf<Logger>` helper.
 
 - **`Context<R>`** — an immutable map from tag to service. `get` only accepts a tag
   whose identity is in `R` (reading an absent service is a compile error). It is
@@ -104,9 +104,6 @@ is an `AsyncResult` rather than a bare `Order | null`.
 import { Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 
-// recover a port's shape from its tag when a signature wants it by name
-type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
-
 class Logger extends Tag("Logger")<
   Logger,
   {
@@ -132,15 +129,15 @@ until its ports are wired, and the rest of the app resolves it with `ctx.get(Get
 
 ```ts
 // application/get-order.ts
-import { type Context, Layer, Tag } from "demesne";
+import { type Context, Layer, type ServiceOf, Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
-import { Logger, OrderRepository, type ServiceOf } from "./ports.js";
+import { Logger, OrderRepository } from "./ports.js";
 
 // The use case logic — constructor DI, one public method, framework-agnostic.
 class GetOrderInteractor {
   constructor(
-    private readonly logger: ServiceOf<typeof Logger>,
-    private readonly orders: ServiceOf<typeof OrderRepository>,
+    private readonly logger: ServiceOf<Logger>,
+    private readonly orders: ServiceOf<OrderRepository>,
   ) {}
 
   execute(id: string): AsyncResult<Order, OrderNotFound> {
@@ -169,7 +166,7 @@ errors live here, and each constructor matches a construction qualification:
 
 ```ts
 // adapters/*.ts
-import { type Context, Layer, Tag } from "demesne";
+import { type Context, Layer, type ServiceOf, Tag } from "demesne";
 import { Err, fromPromise, Ok, TaggedError } from "unthrown";
 
 // infrastructure-only tags — not application ports
@@ -199,7 +196,7 @@ const ConfigLive = Layer.make(AppConfig, () => {
 //    ^? Layer<AppConfig, ConfigError, never>
 
 // pooled connection — async + fallible; needs AppConfig
-const connectDb = (url: string): Promise<ServiceOf<typeof Database>> =>
+const connectDb = (url: string): Promise<ServiceOf<Database>> =>
   url.includes("localhost")
     ? Promise.resolve({ query: () => [] })
     : Promise.reject(new Error("connection refused"));

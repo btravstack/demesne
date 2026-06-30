@@ -6,9 +6,6 @@ import { type AsyncResult } from "unthrown";
 
 import type { Order, OrderNotFound } from "../domain/order.js";
 
-// Recover a port's shape from its tag when a signature wants it by name.
-export type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
-
 export class Logger extends Tag("Logger")<
   Logger,
   {
