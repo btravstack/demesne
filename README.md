@@ -241,6 +241,11 @@ Forget to wire `ConfigLive`, and `Layer.build(AppLayer)` is a **compile error** 
 `Needs` is not `never`. Add a new fallible `Layer.make` anywhere in an adapter, and its
 error type appears in the wiring union that `match` must handle.
 
+> This whole example is a real program in
+> [`examples/clean-architecture`](./examples/clean-architecture) — one file per layer,
+> compiled by `tsc` against demesne's built types in CI. The snippets above can't drift
+> from working code.
+
 ## Design notes
 
 - **Requirements are declared at boundaries.** A consumer states the ports it needs

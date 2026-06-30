@@ -5,6 +5,9 @@
   "workspaces": {
     "packages/*": {
       "project": ["src/**/*.ts"]
+    },
+    "examples/*": {
+      "project": ["src/**/*.ts"]
     }
   },
   "ignoreDependencies": ["typedoc-plugin-markdown", "@demesne/typedoc"]

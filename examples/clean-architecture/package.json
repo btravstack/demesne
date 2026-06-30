@@ -1,0 +1,20 @@
+{
+  "name": "@demesne-examples/clean-architecture",
+  "private": true,
+  "description": "The demesne README example, implemented and type-checked as a real program",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "demesne": "workspace:*",
+    "unthrown": "catalog:"
+  },
+  "devDependencies": {
+    "@demesne/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
+  }
+}
