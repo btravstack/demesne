@@ -69,7 +69,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "unthrown": "^2.0.0"
+    "unthrown": "^3.0.0"
   },
   "engines": {
     "node": ">=22.19"
