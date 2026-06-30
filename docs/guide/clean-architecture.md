@@ -49,25 +49,36 @@ export class OrderRepository extends Tag("OrderRepository")<OrderRepository, {
 
 ## Application
 
-A use case **declares the ports it needs** in its `Context<…>` signature (requirements
-at the boundary, not inferred from usage) and orchestrates them. It never touches an
-adapter, a concrete class, or `process.env`.
+A use case. Dependencies are injected through the **constructor**; its only public
+method is **`execute`**. The signature says exactly what the use case asks for and
+returns — the DI container never leaks in. The use case imports no `Context`, no
+`Layer`, no demesne at all; it depends only on the port _shapes_ (recovered with
+`ServiceOf`).
 
 ```ts
 // application/get-order.ts
-import { type Context } from "demesne";
 import { type AsyncResult } from "unthrown";
-import type { Order, OrderNotFound } from "../domain/order.js";
-import { Logger, OrderRepository } from "./ports.js";
+import { Logger, OrderRepository, type ServiceOf } from "./ports.js";
 
-export const getOrder = (
-  ctx: Context<Logger | OrderRepository>,
-  id: string,
-): AsyncResult<Order, OrderNotFound> => {
-  ctx.get(Logger).log(`looking up order ${id}`);
-  return ctx.get(OrderRepository).findById(id);
-};
+export class GetOrder {
+  constructor(
+    private readonly logger: ServiceOf<typeof Logger>,
+    private readonly orders: ServiceOf<typeof OrderRepository>,
+  ) {}
+
+  execute(id: string): AsyncResult<Order, OrderNotFound> {
+    this.logger.log(`looking up order ${id}`);
+    return this.orders.findById(id);
+  }
+}
 ```
+
+::: tip Why not pass the `Context`?
+Taking `ctx: Context<…>` as a first argument mixes the use case's _input_ with its
+_dependencies_ and couples the application layer to demesne. Constructor injection keeps
+`execute(input)` clean and the use case framework-agnostic — `new GetOrder(fakeLogger,
+fakeOrders)` is all you need to test it.
+:::
 
 ## Adapters
 
@@ -121,9 +132,10 @@ const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<Database>) =>
 
 ## Composition root
 
-The one place adapters are bound to ports. Wire, `Layer.build` once at the edge
-(handling every **wiring** failure as a static union), then run the use case against the
-built `Context`.
+The one place adapters are bound to ports **and the only place the `Context` appears**.
+Wire, `Layer.build` once at the edge (handling every **wiring** failure as a static
+union), then resolve the ports from the built `Context` and hand them to the use case's
+constructor.
 
 ```ts
 // main.ts
@@ -137,9 +149,12 @@ const AppLayer = Layer.merge(LoggerLive, OrderRepoWired);
 const wiring = await Layer.build(AppLayer);
 
 if (wiring.isOk()) {
-  // the built Context provides exactly the ports the use case asks for — and a
-  // richer one would still satisfy it, since Context is contravariant in R.
-  const order = await getOrder(wiring.unwrap(), "order-1");
+  const ctx = wiring.unwrap();
+  // Constructor injection: resolve the ports the use case needs and `new` it up.
+  // `ctx.get` is type-checked — a port the graph didn't provide is a compile error.
+  const getOrder = new GetOrder(ctx.get(Logger), ctx.get(OrderRepository));
+
+  const order = await getOrder.execute("order-1");
   console.log(
     order.match({
       ok: (o) => `order ${o.id}: ${o.total}`,
