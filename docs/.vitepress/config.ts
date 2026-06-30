@@ -53,7 +53,7 @@ export default defineConfig({
           text: "Architecture",
           items: [
             { text: "Clean Architecture", link: "/guide/clean-architecture" },
-            { text: "Roadmap", link: "/guide/roadmap" },
+            { text: "Resources & Scopes", link: "/guide/roadmap" },
           ],
         },
       ],

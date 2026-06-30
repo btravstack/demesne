@@ -238,12 +238,11 @@ describe("internals: defensive runtime guards", () => {
   });
 });
 
-describe("known limitation — single construction is NOT yet guaranteed", () => {
-  // A layer referenced from two branches is currently built TWICE: there is no
-  // MemoMap yet, so each branch constructs `Shared` independently. This guard
-  // documents the current (un-memoized) behavior. When memoization lands, flip
-  // the expected count from 2 to 1 — see the Roadmap in CLAUDE.md / README.
-  it("a shared layer is built once per branch (currently 2)", async () => {
+describe("memoization: a shared layer constructs once per build", () => {
+  // A layer referenced from two branches is built exactly ONCE: the build's memo
+  // map keys layers by reference, so `Shared` is constructed a single time and the
+  // resulting service is reused across branches.
+  it("constructs a layer shared across two branches only once", async () => {
     let constructions = 0;
 
     const Shared = Layer.make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, never> => {
@@ -268,7 +267,116 @@ describe("known limitation — single construction is NOT yet guaranteed", () =>
     const result = await Layer.build(App);
 
     expect(result.isOk()).toBe(true);
-    // GUARD: flip to `1` when shared-layer memoization is implemented.
+    expect(constructions).toBe(1);
+  });
+
+  it("rebuilds across separate Layer.build calls (memo is per build)", async () => {
+    let constructions = 0;
+    const Shared = Layer.make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, never> => {
+      constructions += 1;
+      return Ok({ dbUrl: "postgres://localhost/app" });
+    });
+
+    await Layer.build(Shared);
+    await Layer.build(Shared);
+
     expect(constructions).toBe(2);
+  });
+});
+
+describe("scopes: acquireRelease + scoped", () => {
+  type Pool = { readonly id: number };
+  class PoolA extends Tag("PoolA")<PoolA, Pool>() {}
+  class PoolB extends Tag("PoolB")<PoolB, Pool>() {}
+
+  it("releases acquired resources in reverse order after `use`", async () => {
+    const events: string[] = [];
+
+    const A = Layer.acquireRelease(
+      PoolA,
+      (): Result<Pool, never> => {
+        events.push("acquire:A");
+        return Ok({ id: 1 });
+      },
+      (p) => {
+        events.push(`release:A(${p.id})`);
+      },
+    );
+    // B needs A, so A is acquired before B — and must be released AFTER B (LIFO).
+    const B = Layer.acquireRelease(
+      PoolB,
+      (ctx: Context<PoolA>): Result<Pool, never> => {
+        events.push(`acquire:B(sees ${ctx.get(PoolA).id})`);
+        return Ok({ id: 2 });
+      },
+      (p) => {
+        events.push(`release:B(${p.id})`);
+      },
+    );
+
+    const app = Layer.provideTo(B, A);
+    const out = await Layer.scoped(app, (ctx): Result<number, never> => {
+      events.push("use");
+      return Ok(ctx.get(PoolB).id);
+    });
+
+    expect(out.unwrap()).toBe(2);
+    expect(events).toEqual([
+      "acquire:A",
+      "acquire:B(sees 1)",
+      "use",
+      "release:B(2)",
+      "release:A(1)",
+    ]);
+  });
+
+  it("releases resources even when `use` fails", async () => {
+    const released: string[] = [];
+    class Boom extends TaggedError("Boom")<{ why: string }> {}
+
+    const A = Layer.acquireRelease(
+      PoolA,
+      (): Result<Pool, never> => Ok({ id: 1 }),
+      () => {
+        released.push("A");
+      },
+    );
+
+    const out = await Layer.scoped(A, (): Result<number, Boom> => Err(new Boom({ why: "nope" })));
+
+    expect(out.isErr()).toBe(true);
+    expect(out.unwrapErr()).toBeInstanceOf(Boom);
+    expect(released).toEqual(["A"]); // released despite the failure
+  });
+
+  it("`scoped` returns the `use` result and supports async use", async () => {
+    const A = Layer.value(PoolA, { id: 7 });
+    const out = await Layer.scoped(A, (ctx) =>
+      fromSafePromise(Promise.resolve(`pool ${ctx.get(PoolA).id}`)),
+    );
+    expect(out.unwrap()).toBe("pool 7");
+  });
+
+  it("teardown is best-effort: a throwing release does not abort the rest", async () => {
+    const released: string[] = [];
+    const A = Layer.acquireRelease(
+      PoolA,
+      (): Result<Pool, never> => Ok({ id: 1 }),
+      () => {
+        released.push("A");
+      },
+    );
+    const B = Layer.acquireRelease(
+      PoolB,
+      (_ctx: Context<PoolA>): Result<Pool, never> => Ok({ id: 2 }),
+      () => {
+        throw new Error("release B failed");
+      },
+    );
+    // A is acquired first, so it is released LAST — after B's release throws.
+    const out = await Layer.scoped(Layer.provideTo(B, A), (): Result<string, never> => Ok("done"));
+
+    expect(out.unwrap()).toBe("done"); // the throwing release is swallowed
+    expect(released).toEqual(["A"]); // A still released after B's release threw
   });
 });

@@ -91,3 +91,25 @@ declare const poor: Context<ServiceA>;
 const wantsAB = (_: Context<ServiceA | ServiceB>): void => {};
 // @ts-expect-error - a Context<ServiceA> cannot satisfy a consumer needing ServiceA | ServiceB.
 wantsAB(poor);
+
+// --- 5. acquireRelease + scoped ----------------------------------------------
+
+// acquireRelease produces a fallible layer; its error and needs come from `acquire`.
+const resourceLayer = Layer.acquireRelease(
+  ServiceA,
+  (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }),
+  () => {},
+);
+type _resource = Expect<Equal<typeof resourceLayer, Layer<ServiceA, EA, never>>>;
+
+// scoped runs `use` against the built Context and unions the error channels.
+const scopedResult = Layer.scoped(
+  resourceLayer,
+  (ctx): Result<string, EB> => Ok(ctx.get(ServiceA).a),
+);
+type _scoped = Expect<Equal<typeof scopedResult, AsyncResult<string, EA | EB>>>;
+
+// scoped is callable only when Needs is never, exactly like build.
+declare const unwiredResource: Layer<ServiceA, never, ServiceB>;
+// @ts-expect-error - scoped requires Needs = never; ServiceB is still unmet.
+Layer.scoped(unwiredResource, (): Result<number, never> => Ok(1));

@@ -127,24 +127,35 @@ short-circuit, throw → Defect, and an N-way merge.)_
 ### 9. Operations are namespaced under `Layer` / `Context`
 
 The public value surface is grouped into companion objects so a reader can tell a
-Layer operation from a Context one: `Layer.{value,factory,make,merge,provideTo,build}`
-and `Context.{empty}`. `Context` and `Layer` are each **both a type and a value**
-(`Context<R>` / `Context.empty()`, `Layer<P, E, N>` / `Layer.make(...)`). `Tag` stays
-top-level — it names a service and builds neither. Do not re-flatten these into
-top-level function exports.
+Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,merge,
+provideTo,build,scoped}` and `Context.{empty}`. `Context` and `Layer` are each **both a
+type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
+`Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
+not re-flatten these into top-level function exports.
 
-## Roadmap invariants — NOT yet met (state them so they aren't mistaken for done)
+### 10. A `Scope` is threaded through every build (memoization + teardown)
 
-These are deliberately **out of scope** for the initial release. The code is shaped
-so they slot in later; do not assume them in consumer code yet.
+Every `build` receives a `Scope` carrying a **memo map** and a **finalizer list**.
 
-- **Single construction of shared layers (memoization).** A layer referenced from
-  two branches is currently built **once per branch** (i.e. twice). There is no
-  `MemoMap` yet. The runtime spec asserts the current count is `2` as a guard — flip
-  it to `1` when memoization lands. Do **not** implement memoization as part of init.
-- **Ordered teardown (scopes / `acquireRelease`).** There is no scope or resource
-  finalization story yet; layers acquire but never release. A `Scope` /
-  `acquireRelease` story comes later.
+- **Memoization.** `buildMemo` keys layers by **reference**: a layer shared across
+  branches (same object) constructs **once** per build, and the in-flight `AsyncResult`
+  is reused (so concurrent `merge` branches don't double-build). The memo map is
+  per-`build`/`scoped` call — separate builds reconstruct. _(Guarded by the spec: a
+  layer shared across two branches constructs once; separate builds reconstruct.)_
+- **Ordered teardown.** `acquireRelease(tag, acquire, release)` registers `release`
+  with the scope. `scoped(layer, use)` builds, runs `use`, then closes the scope —
+  running finalizers in **reverse acquisition order (LIFO)**, whether `use` succeeded,
+  failed, or the build failed partway. `release` is expected to be infallible; teardown
+  is best-effort (a throwing release does not abort the others). `build` does **not**
+  close the scope, so resource layers must be consumed with `scoped`. _(Guarded by the
+  spec: LIFO order, release-on-failure, best-effort teardown.)_
+
+## Roadmap (future ideas, not yet built)
+
+- **Type-level scope enforcement.** Today `build` will happily run a graph containing
+  `acquireRelease` layers and silently drop their finalizers; only `scoped` closes the
+  scope. A future refinement could track a `Scope` requirement in the type (à la
+  Effect's `R`) so `build` rejects scope-needing layers at compile time.
 
 ## Toolchain (mirrors `unthrown`)
 

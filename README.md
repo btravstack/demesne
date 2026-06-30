@@ -66,11 +66,12 @@ and `Layer` are each both a **type** and a **value** — `Context<R>` / `Context
 
 Layer constructors, by how construction is qualified:
 
-| constructor                 | sync/async        | can fail | needs context |
-| --------------------------- | ----------------- | -------- | ------------- |
-| `Layer.value(tag, service)` | ready value       | no       | no            |
-| `Layer.factory(tag, f)`     | sync              | no       | yes           |
-| `Layer.make(tag, f)`        | sync **or** async | yes      | yes           |
+| constructor                                   | sync/async        | can fail | needs context | teardown |
+| --------------------------------------------- | ----------------- | -------- | ------------- | -------- |
+| `Layer.value(tag, service)`                   | ready value       | no       | no            | no       |
+| `Layer.factory(tag, f)`                       | sync              | no       | yes           | no       |
+| `Layer.make(tag, f)`                          | sync **or** async | yes      | yes           | no       |
+| `Layer.acquireRelease(tag, acquire, release)` | sync **or** async | yes      | yes           | yes      |
 
 ## Example
 
@@ -331,15 +332,38 @@ Use `fromSchemaAsync` instead if your schema validates asynchronously — it ret
 it promotes cleanly into a thin `@demesne/standard-schema` adapter package (the monorepo
 is built to grow that way) — but it does **not** belong in the core.
 
+## Resources & memoization
+
+A build threads a **scope** through every layer:
+
+- **Memoization** — a layer shared across branches constructs **once** per `build`
+  (keyed by reference), and the result is reused. No more double-construction.
+- **`acquireRelease` + `scoped`** — acquire a resource and register its release;
+  `Layer.scoped(layer, use)` builds, runs `use`, then releases every resource in
+  reverse order (LIFO), whether `use` succeeded or failed.
+
+```ts
+const PoolLive = Layer.acquireRelease(
+  Pool,
+  () => fromPromise(openPool(), (c) => new PoolError({ cause: c })),
+  (pool) => pool.close(), // released after `use`, in reverse acquisition order
+);
+
+const summary = await Layer.scoped(provideTo(RepoLive, PoolLive), (ctx) =>
+  ctx.get(OrderRepository).findById("order-1"),
+);
+// pool is closed here, even if findById failed
+```
+
+> `Layer.build` does not close the scope (finalizers never run) — use `Layer.scoped`
+> for graphs with `acquireRelease` layers.
+
 ## Roadmap
 
-demesne ships the wiring core today. Two capabilities are deliberately **not yet**
-implemented (see [`CLAUDE.md`](./CLAUDE.md) for the invariants):
-
-1. **Memoization** — a shared `MemoMap` so each layer constructs **once** across a
-   `build`. Today a layer referenced from two branches is built once _per branch_.
-2. **Scopes / `acquireRelease`** — ordered resource teardown. Today layers acquire
-   but never release.
+The wiring core is complete (memoization and scoped resources included). A possible
+future refinement is **type-level scope enforcement** — tracking a `Scope` requirement
+in the type so `build` rejects unreleased resource layers at compile time (today that's
+a documented convention, not a compile error). See [`CLAUDE.md`](./CLAUDE.md).
 
 ## License
 

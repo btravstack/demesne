@@ -6,9 +6,9 @@ This reference is generated from the source with
 ## Packages
 
 - [**demesne**](./core/) — the core `Tag` / `Context` / `Layer` types, the
-  `ServiceOf` helper, the `Layer.value` / `Layer.factory` / `Layer.make`
-  constructors, the `Layer.merge` / `Layer.provideTo` combinators, the terminal
-  `Layer.build`, and `Context.empty`.
+  `ServiceOf` helper, the `Layer.value` / `Layer.factory` / `Layer.make` /
+  `Layer.acquireRelease` constructors, the `Layer.merge` / `Layer.provideTo`
+  combinators, and the terminals `Layer.build` / `Layer.scoped` (plus `Context.empty`).
 
 `Context` and `Layer` are each both a **type** and a **value** (the companion-object
 pattern): `Context<R>` / `Context.empty()`, `Layer<P, E, N>` / `Layer.make(...)`.

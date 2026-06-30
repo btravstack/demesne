@@ -2,14 +2,15 @@
 
 ## The constructor family
 
-Three constructors, distinguished by how construction is **qualified**. Do not collapse
-them into a single value-or-function overload.
+Constructors, distinguished by how construction is **qualified**. Do not collapse the
+first three into a single value-or-function overload.
 
-| constructor                 | sync/async        | can fail | needs context |
-| --------------------------- | ----------------- | -------- | ------------- |
-| `Layer.value(tag, service)` | ready value       | no       | no            |
-| `Layer.factory(tag, f)`     | sync              | no       | yes           |
-| `Layer.make(tag, f)`        | sync **or** async | yes      | yes           |
+| constructor                                    | sync/async        | can fail | needs context | teardown |
+| ---------------------------------------------- | ----------------- | -------- | ------------- | -------- |
+| `Layer.value(tag, service)`                    | ready value       | no       | no            | no       |
+| `Layer.factory(tag, f)`                        | sync              | no       | yes           | no       |
+| `Layer.make(tag, f)`                           | sync **or** async | yes      | yes           | no       |
+| `Layer.acquireRelease(tag, acquire, release)`  | sync **or** async | yes      | yes           | yes      |
 
 ```ts
 // value — an already-built service.
@@ -99,3 +100,26 @@ const result = await Layer.build(AppLayer);
 `Layer` type, which is a **property** (not a method) on purpose — that's what gives
 `Needs` its strict contravariance, making a missing dependency a real compile error.
 :::
+
+A build also **memoizes**: a layer shared across branches constructs once. For resources
+that need teardown, see [Resources & Scopes](./roadmap).
+
+### `Layer.acquireRelease` + `Layer.scoped` — resources
+
+`Layer.acquireRelease(tag, acquire, release)` builds a service and registers its release.
+`Layer.scoped(layer, use)` builds, runs `use`, then releases every resource in reverse
+order (LIFO) — even if `use` fails.
+
+```ts
+const PoolLive = Layer.acquireRelease(
+  Pool,
+  () => fromPromise(openPool(), (cause) => new PoolError({ cause })),
+  (pool) => pool.end(),
+);
+
+const result = await Layer.scoped(PoolLive, (ctx) => useThePool(ctx.get(Pool)));
+// pool released here, whatever the outcome
+```
+
+`Layer.build` does **not** close the scope, so consume resource graphs with
+`Layer.scoped`. Full details in [Resources & Scopes](./roadmap).
