@@ -102,7 +102,8 @@ describe("happy path: a value + factory + make graph builds to Ok", () => {
 
     const DatabaseWired = provideTo(DatabaseLive, ConfigLive);
     const RepoWired = provideTo(OrderRepoLive, DatabaseWired);
-    const AppLayer = merge(merge(LoggerLive, RepoWired), DatabaseWired);
+    // merge is variadic — combine the three independent layers in one call.
+    const AppLayer = merge(LoggerLive, RepoWired, DatabaseWired);
 
     const result = await build(AppLayer);
 
@@ -177,6 +178,32 @@ describe("parallel merge", () => {
     // The fast layer starts before the slow one ends → genuine concurrency,
     // and finishes first → interleave, not sequential execution.
     expect(order).toEqual(["slow:start", "fast:start", "fast:end", "slow:end"]);
+  });
+
+  it("merges more than two layers in one call, unioning every channel", async () => {
+    const built: string[] = [];
+    const A = make(LoggerService, (): Result<ServiceOf<typeof LoggerService>, never> => {
+      built.push("A");
+      return Ok({ log: () => {} });
+    });
+    const B = make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, never> => {
+      built.push("B");
+      return Ok({ dbUrl: "postgres://localhost/app" });
+    });
+    const C = make(Marker, (): Result<ServiceOf<typeof Marker>, never> => {
+      built.push("C");
+      return Ok({ ok: true });
+    });
+
+    const result = await build(merge(A, B, C));
+
+    expect(result.isOk()).toBe(true);
+    const ctx = result.unwrap();
+    // Every layer's service is present in the merged Context.
+    ctx.get(LoggerService).log("hi");
+    expect(ctx.get(AppConfig).dbUrl).toBe("postgres://localhost/app");
+    expect(ctx.get(Marker).ok).toBe(true);
+    expect([...built].sort()).toEqual(["A", "B", "C"]);
   });
 
   it("the first Err short-circuits the merge", async () => {

@@ -21,9 +21,11 @@ type Expect<T extends true> = T;
 
 class ServiceA extends Tag("ServiceA")<ServiceA, { readonly a: string }>() {}
 class ServiceB extends Tag("ServiceB")<ServiceB, { readonly b: number }>() {}
+class ServiceC extends Tag("ServiceC")<ServiceC, { readonly c: boolean }>() {}
 
 class EA extends TaggedError("EA")<{ x: number }> {}
 class EB extends TaggedError("EB")<{ y: string }> {}
+class EC extends TaggedError("EC")<{ z: boolean }> {}
 
 // --- 1. Reading an absent service is a type error ----------------------------
 
@@ -62,6 +64,17 @@ type _graphResult = Expect<
 // @ts-expect-error - the error channel is EA | EB, not EA alone.
 const narrowed: AsyncResult<Context<ServiceA | ServiceB>, EA> = graphResult;
 void narrowed;
+
+// --- 3b. merge is variadic: every channel unions across all layers -----------
+
+const layerC = make(ServiceC, (): Result<{ readonly c: boolean }, EC> => Ok({ c: true }));
+const triple = build(merge(layerA, layerB, layerC));
+type _triple = Expect<
+  Equal<typeof triple, AsyncResult<Context<ServiceA | ServiceB | ServiceC>, EA | EB | EC>>
+>;
+
+// @ts-expect-error - merge requires at least one layer.
+merge();
 
 // --- 4. Context is contravariant in R ----------------------------------------
 

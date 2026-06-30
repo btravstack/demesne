@@ -116,10 +116,11 @@ single value-or-function overload:
 
 ### 8. `merge` builds in parallel; failure semantics are fixed
 
-`merge` builds its two layers concurrently via `allAsync`. The **first `Err`
-short-circuits**; a thrown value becomes a **`Defect`** (it dominates). Errors and
-requirements both union. _(Guarded by the runtime spec: timing interleave, Err
-short-circuit, throw → Defect.)_
+`merge` is **variadic** — it combines any number of independent layers (at least one)
+and builds them concurrently via `allAsync`. The **first `Err` short-circuits**; a
+thrown value becomes a **`Defect`** (it dominates). Provides, errors, and requirements
+all union across every layer. _(Guarded by the runtime spec: timing interleave, Err
+short-circuit, throw → Defect, and an N-way merge.)_
 
 ## Roadmap invariants — NOT yet met (state them so they aren't mistaken for done)
 
@@ -142,9 +143,10 @@ Lint/format with **oxlint** + **oxfmt**. Strict shared tsconfig at
 for `*.test-d.ts` (type-level); `typecheck` runs both. Docs via **typedoc**. Release
 via **changesets** + conventional commits, with **lefthook** hooks and **knip**.
 
-> **Note on the vendored core.** `packages/core/src/index.ts` is the finished,
-> verified DI core, used verbatim. It deliberately uses `interface` declarations and
-> internal `any` casts (the value-level wiring is necessarily unsafe under the typed
-> surface). `.oxlintrc.json` therefore scopes off `no-explicit-any` and
-> `consistent-type-definitions` **only** for that one file; both rules stay enforced
-> everywhere else.
+> **Note on the core.** `packages/core/src/index.ts` originated as a verified DI core,
+> vendored verbatim at init, and is now maintained here (e.g. `merge` was made
+> variadic). It deliberately uses `interface` declarations and internal `any` casts
+> (the value-level wiring is necessarily unsafe under the typed surface).
+> `.oxlintrc.json` and `.oxfmtrc.json` therefore scope off `no-explicit-any` /
+> `consistent-type-definitions` (and formatting) **only** for that one file; the rules
+> stay enforced everywhere else.

@@ -169,7 +169,8 @@ const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) =
 ### 4. Wire the graph
 
 `provideTo` feeds one layer into another and **discharges** the shared requirement;
-`merge` combines independent layers. Requirements and errors accumulate as unions.
+`merge` combines any number of independent layers in one call. Requirements and errors
+accumulate as unions.
 
 ```ts
 import { merge, provideTo } from "demesne";
@@ -177,7 +178,7 @@ import { merge, provideTo } from "demesne";
 const DatabaseWired = provideTo(DatabaseLive, ConfigLive);
 //    ^? Layer<DatabaseService, ConnectionError | ConfigError, never>
 const RepoWired = provideTo(OrderRepoLive, DatabaseWired);
-const AppLayer = merge(merge(LoggerLive, RepoWired), DatabaseWired);
+const AppLayer = merge(LoggerLive, RepoWired, DatabaseWired);
 //    ^? Layer<LoggerService | OrderRepository | DatabaseService, ConnectionError | ConfigError, never>
 ```
 

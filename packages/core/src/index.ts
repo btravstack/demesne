@@ -131,15 +131,25 @@ export const make = <Self, Service, E, Needs = never>(
       .map((service) => unsafeAdd(emptyAny(), tag.key, service)),
 });
 
-// Combine two independent layers. They build in PARALLEL (allAsync); the first
-// Err short-circuits, a Defect dominates. Errors and requirements both union.
-export const merge = <PA, EA, NA, PB, EB, NB>(
-  a: Layer<PA, EA, NA>,
-  b: Layer<PB, EB, NB>,
-): Layer<PA | PB, EA | EB, NA | NB> => ({
+// Distribute over a union of layers to collect each channel as a union. Naked
+// type parameters, so applying them to `Ls[number]` distributes over the tuple.
+type ProvidesOf<L> = L extends Layer<infer P, any, any> ? P : never;
+type ErrorOf<L> = L extends Layer<any, infer E, any> ? E : never;
+type NeedsOf<L> = L extends Layer<any, any, infer N> ? N : never;
+
+// Combine any number of independent layers (at least one). They build in PARALLEL
+// (allAsync); the first Err short-circuits, a Defect dominates. Provides, errors,
+// and requirements all union across every layer.
+export const merge = <
+  Ls extends readonly [Layer<any, any, any>, ...Layer<any, any, any>[]],
+>(
+  ...layers: Ls
+): Layer<ProvidesOf<Ls[number]>, ErrorOf<Ls[number]>, NeedsOf<Ls[number]>> => ({
   build: (ctx) =>
-    allAsync([a.build(ctx as Context<any>), b.build(ctx as Context<any>)]).map(
-      ([ca, cb]) => mergeContext(ca, cb),
+    allAsync(
+      (layers as readonly Layer<any, any, any>[]).map((layer) => layer.build(ctx as Context<any>)),
+    ).map((contexts) =>
+      (contexts as Context<any>[]).reduce((merged, c) => mergeContext(merged, c), emptyAny()),
     ),
 });
 
