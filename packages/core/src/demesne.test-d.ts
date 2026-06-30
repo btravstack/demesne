@@ -8,7 +8,7 @@
 // the core was designed for: absent reads fail, un-wired requirements block
 // `build`, the error channel is the real union, and `Context` is contravariant.
 
-import { build, type Context, type Layer, make, merge, Tag } from "./index.js";
+import { type Context, Layer, Tag } from "./index.js";
 import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
 
 // --- assertion helpers -------------------------------------------------------
@@ -41,21 +41,21 @@ ctxA.get(ServiceB);
 
 // A fully-wired layer (Needs = never) builds, yielding the carried error union.
 declare const wired: Layer<ServiceA, EA, never>;
-const built = build(wired);
+const built = Layer.build(wired);
 type _built = Expect<Equal<typeof built, AsyncResult<Context<ServiceA>, EA>>>;
 
 // A layer that still needs ServiceA is NOT accepted by `build` (Needs must be never).
 declare const unwired: Layer<ServiceB, never, ServiceA>;
 // @ts-expect-error - `build` requires Needs = never; ServiceA is still unmet.
-build(unwired);
+Layer.build(unwired);
 
 // --- 3. The error channel is the real union, not `any` -----------------------
 
-const layerA = make(ServiceA, (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }));
-const layerB = make(ServiceB, (): Result<{ readonly b: number }, EB> => Ok({ b: 1 }));
-const graph = merge(layerA, layerB);
+const layerA = Layer.make(ServiceA, (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }));
+const layerB = Layer.make(ServiceB, (): Result<{ readonly b: number }, EB> => Ok({ b: 1 }));
+const graph = Layer.merge(layerA, layerB);
 
-const graphResult = build(graph);
+const graphResult = Layer.build(graph);
 type _graphResult = Expect<
   Equal<typeof graphResult, AsyncResult<Context<ServiceA | ServiceB>, EA | EB>>
 >;
@@ -67,14 +67,14 @@ void narrowed;
 
 // --- 3b. merge is variadic: every channel unions across all layers -----------
 
-const layerC = make(ServiceC, (): Result<{ readonly c: boolean }, EC> => Ok({ c: true }));
-const triple = build(merge(layerA, layerB, layerC));
+const layerC = Layer.make(ServiceC, (): Result<{ readonly c: boolean }, EC> => Ok({ c: true }));
+const triple = Layer.build(Layer.merge(layerA, layerB, layerC));
 type _triple = Expect<
   Equal<typeof triple, AsyncResult<Context<ServiceA | ServiceB | ServiceC>, EA | EB | EC>>
 >;
 
 // @ts-expect-error - merge requires at least one layer.
-merge();
+Layer.merge();
 
 // --- 4. Context is contravariant in R ----------------------------------------
 

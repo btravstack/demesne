@@ -52,16 +52,21 @@ Three concepts:
   **contravariant** in `R`: a `Context<A | B>` works wherever a `Context<A>` is asked.
 - **`Layer<Provides, E, Needs>`** — a recipe that builds the services in `Provides`,
   possibly requiring `Needs` and possibly failing with `E`. Both `Needs` and `E`
-  accumulate as **unions**: `merge` widens them, `provideTo` subtracts from `Needs`.
-  You can `build` only once `Needs` is `never`.
+  accumulate as **unions**: `Layer.merge` widens them, `Layer.provideTo` subtracts
+  from `Needs`. You can `Layer.build` only once `Needs` is `never`.
 
-Constructors, by how construction is qualified:
+Operations are grouped under two namespaces so call sites read unambiguously:
+`Layer.*` (constructors, combinators, `build`) and `Context.*` (`empty`). `Context`
+and `Layer` are each both a **type** and a **value** — `Context<R>` / `Context.empty()`,
+`Layer<P, E, N>` / `Layer.make(...)`. `Tag` stays top-level.
 
-| constructor           | sync/async        | can fail | needs context |
-| --------------------- | ----------------- | -------- | ------------- |
-| `value(tag, service)` | ready value       | no       | no            |
-| `factory(tag, f)`     | sync              | no       | yes           |
-| `make(tag, f)`        | sync **or** async | yes      | yes           |
+Layer constructors, by how construction is qualified:
+
+| constructor                 | sync/async        | can fail | needs context |
+| --------------------------- | ----------------- | -------- | ------------- |
+| `Layer.value(tag, service)` | ready value       | no       | no            |
+| `Layer.factory(tag, f)`     | sync              | no       | yes           |
+| `Layer.make(tag, f)`        | sync **or** async | yes      | yes           |
 
 ## Example
 
@@ -128,34 +133,34 @@ One constructor per construction qualification: `value` (ready), `factory` (sync
 infallible), `make` (fallible and/or async).
 
 ```ts
-import { factory, make, value, type Context } from "demesne";
+import { type Context, Layer } from "demesne";
 import { Err, fromPromise, Ok, type Result } from "unthrown";
 
-// value: a ready service — needs nothing, cannot fail.
-const LoggerLive = value(LoggerService, { log: (m) => console.log(`[log] ${m}`) });
+// Layer.value: a ready service — needs nothing, cannot fail.
+const LoggerLive = Layer.value(LoggerService, { log: (m) => console.log(`[log] ${m}`) });
 
-// make: sync but FALLIBLE — returns a Result; its error joins the E channel.
-const ConfigLive = make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
+// Layer.make: sync but FALLIBLE — returns a Result; its error joins the E channel.
+const ConfigLive = Layer.make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
   const url = "postgres://localhost/app";
   return url.startsWith("postgres://")
     ? Ok({ dbUrl: url })
     : Err(new ConfigError({ reason: "DB_URL must be a postgres:// url" }));
 });
 
-// make: ASYNC and fallible — needs AppConfig; fromPromise qualifies the rejection.
+// Layer.make: ASYNC and fallible — needs AppConfig; fromPromise qualifies the rejection.
 const connectDb = (url: string): Promise<ServiceOf<typeof DatabaseService>> =>
   url.includes("localhost")
     ? Promise.resolve({ query: () => [] })
     : Promise.reject(new Error("connection refused"));
 
-const DatabaseLive = make(DatabaseService, (ctx: Context<AppConfig>) => {
+const DatabaseLive = Layer.make(DatabaseService, (ctx: Context<AppConfig>) => {
   const { dbUrl } = ctx.get(AppConfig);
   return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
 });
 
-// factory: the factory itself is sync + infallible (it just assembles the repo),
+// Layer.factory: the factory itself is sync + infallible (it just assembles the repo),
 // but the repo's findById returns an AsyncResult carrying a modeled OrderNotFound.
-const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) => {
+const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<DatabaseService>) => {
   const db = ctx.get(DatabaseService);
   return {
     findById: (id) => {
@@ -168,30 +173,30 @@ const OrderRepoLive = factory(OrderRepository, (ctx: Context<DatabaseService>) =
 
 ### 4. Wire the graph
 
-`provideTo` feeds one layer into another and **discharges** the shared requirement;
-`merge` combines any number of independent layers in one call. Requirements and errors
-accumulate as unions.
+`Layer.provideTo` feeds one layer into another and **discharges** the shared
+requirement; `Layer.merge` combines any number of independent layers in one call.
+Requirements and errors accumulate as unions.
 
 ```ts
-import { merge, provideTo } from "demesne";
+import { Layer } from "demesne";
 
-const DatabaseWired = provideTo(DatabaseLive, ConfigLive);
+const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
 //    ^? Layer<DatabaseService, ConnectionError | ConfigError, never>
-const RepoWired = provideTo(OrderRepoLive, DatabaseWired);
-const AppLayer = merge(LoggerLive, RepoWired, DatabaseWired);
+const RepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
+const AppLayer = Layer.merge(LoggerLive, RepoWired, DatabaseWired);
 //    ^? Layer<LoggerService | OrderRepository | DatabaseService, ConnectionError | ConfigError, never>
 ```
 
 ### 5. Build at the edge
 
-`build` is callable only once `Needs` is `never`. You then handle **two distinct
-unthrown results**: the wiring union from `build`, and — one level down — each service
-operation's own union.
+`Layer.build` is callable only once `Needs` is `never`. You then handle **two distinct
+unthrown results**: the wiring union from `Layer.build`, and — one level down — each
+service operation's own union.
 
 ```ts
-import { build } from "demesne";
+import { Layer } from "demesne";
 
-const wiring = await build(AppLayer);
+const wiring = await Layer.build(AppLayer);
 //    ^? Result<Context<LoggerService | OrderRepository | DatabaseService>, ConnectionError | ConfigError>
 
 if (wiring.isOk()) {
@@ -215,9 +220,9 @@ if (wiring.isOk()) {
 }
 ```
 
-Forget to wire `ConfigLive`, and `build(AppLayer)` is a **compile error** — `Needs`
-is not `never`. Add a new fallible `make`, and its error type appears in the union
-that `match` must handle.
+Forget to wire `ConfigLive`, and `Layer.build(AppLayer)` is a **compile error** —
+`Needs` is not `never`. Add a new fallible `Layer.make`, and its error type appears in
+the union that `match` must handle.
 
 ## Design notes
 
@@ -227,18 +232,19 @@ that `match` must handle.
   code, an explicit port list is a feature.
 - **No monad.** demesne does the wiring and nothing else. Async and failure are
   first-class only because construction builds to an `unthrown` `AsyncResult`.
-- **`build` is a property, not a method.** Method parameters are checked bivariantly
-  in TypeScript, which would let an un-wired layer slip past. A property function
-  type keeps strict contravariance in `Needs`, so a missing dependency is a real
-  compile error.
-- **Qualify at the boundary.** Async / fallible work enters only through `make`; a
-  raw `Promise` must never enter a combinator. Re-enter the typed world with
+- **A `Layer`'s `build` member is a property, not a method.** Method parameters are
+  checked bivariantly in TypeScript, which would let an un-wired layer slip past. A
+  property function type keeps strict contravariance in `Needs`, so a missing
+  dependency is a real compile error. (This is the `build` field on the `Layer` type —
+  distinct from the `Layer.build(...)` runner.)
+- **Qualify at the boundary.** Async / fallible work enters only through `Layer.make`;
+  a raw `Promise` must never enter a combinator. Re-enter the typed world with
   `fromPromise` / `fromSafePromise`, exactly as in `unthrown`.
 
 ## Configuration (recipe)
 
-Reading config from the environment and validating it is just a **fallible `make`** fed
-by [`@unthrown/standard-schema`](https://github.com/btravstack/unthrown/tree/main/packages/standard-schema) —
+Reading config from the environment and validating it is just a **fallible `Layer.make`**
+fed by [`@unthrown/standard-schema`](https://github.com/btravstack/unthrown/tree/main/packages/standard-schema) —
 demesne adds no config primitive of its own (that would break "does one thing: wiring").
 The schema → `Result` bridge already lives in unthrown's ecosystem; demesne only wires
 the validated result.
@@ -248,7 +254,7 @@ the layer — it keeps config testable (fake env in tests, real env at the edge)
 the boundary-declared style demesne favours.
 
 ```ts
-import { build, type Context, make, provideTo, Tag, value } from "demesne";
+import { type Context, Layer, Tag } from "demesne";
 import { fromSchema, type SchemaIssues } from "@unthrown/standard-schema";
 import { type Result, TaggedError } from "unthrown";
 import { z } from "zod"; // any Standard Schema validator (zod / valibot / arktype)
@@ -264,18 +270,18 @@ class AppConfig extends Tag("AppConfig")<AppConfig, z.infer<typeof ConfigSchema>
 class ConfigError extends TaggedError("ConfigError")<{ issues: SchemaIssues }> {}
 
 // Sync + fallible: validate the injected env against the schema.
-const AppConfigLive = make(AppConfig, (ctx: Context<Env>) =>
+const AppConfigLive = Layer.make(AppConfig, (ctx: Context<Env>) =>
   fromSchema(ConfigSchema)(ctx.get(Env)).mapErr((issues) => new ConfigError({ issues })),
 );
 //    ^? Layer<AppConfig, ConfigError, Env>
 
 // Wire the env at the composition edge.
-const result = await build(provideTo(AppConfigLive, value(Env, process.env)));
+const result = await Layer.build(Layer.provideTo(AppConfigLive, Layer.value(Env, process.env)));
 //    ^? Result<Context<AppConfig>, ConfigError>
 ```
 
 Use `fromSchemaAsync` instead if your schema validates asynchronously — it returns an
-`AsyncResult`, which `make` accepts unchanged. If you find yourself repeating this trio,
+`AsyncResult`, which `Layer.make` accepts unchanged. If you find yourself repeating this trio,
 it promotes cleanly into a thin `@demesne/standard-schema` adapter package (the monorepo
 is built to grow that way) — but it does **not** belong in the core.
 

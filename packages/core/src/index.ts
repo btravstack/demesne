@@ -77,7 +77,7 @@ const makeContext = (map: ReadonlyMap<string, unknown>): Context<any> => ({
 });
 
 const emptyAny = (): Context<any> => makeContext(new Map());
-export const empty = (): Context<never> => makeContext(new Map());
+const empty = (): Context<never> => makeContext(new Map());
 
 const unsafeAdd = (ctx: Context<any>, key: string, service: unknown): Context<any> =>
   makeContext(new Map(ctx.unsafeMap).set(key, service));
@@ -101,7 +101,7 @@ export interface Layer<Provides, E = never, Needs = never> {
 }
 
 // A layer from an already-constructed value. Needs nothing, cannot fail.
-export const value = <Self, Service>(
+const value = <Self, Service>(
   tag: Tag<Self, Service>,
   service: Service,
 ): Layer<Self, never, never> => ({
@@ -109,7 +109,7 @@ export const value = <Self, Service>(
 });
 
 // A layer built synchronously and infallibly from the context.
-export const factory = <Self, Service, Needs = never>(
+const factory = <Self, Service, Needs = never>(
   tag: Tag<Self, Service>,
   f: (ctx: Context<Needs>) => Service,
 ): Layer<Self, never, Needs> => ({
@@ -118,7 +118,7 @@ export const factory = <Self, Service, Needs = never>(
 
 // A layer whose construction may FAIL and/or be ASYNC: the factory returns a
 // Result or an AsyncResult, whose error type becomes the layer's `E`.
-export const make = <Self, Service, E, Needs = never>(
+const make = <Self, Service, E, Needs = never>(
   tag: Tag<Self, Service>,
   f: (ctx: Context<Needs>) => Result<Service, E> | AsyncResult<Service, E>,
 ): Layer<Self, E, Needs> => ({
@@ -140,9 +140,7 @@ type NeedsOf<L> = L extends Layer<any, any, infer N> ? N : never;
 // Combine any number of independent layers (at least one). They build in PARALLEL
 // (allAsync); the first Err short-circuits, a Defect dominates. Provides, errors,
 // and requirements all union across every layer.
-export const merge = <
-  Ls extends readonly [Layer<any, any, any>, ...Layer<any, any, any>[]],
->(
+const merge = <Ls extends readonly [Layer<any, any, any>, ...Layer<any, any, any>[]]>(
   ...layers: Ls
 ): Layer<ProvidesOf<Ls[number]>, ErrorOf<Ls[number]>, NeedsOf<Ls[number]>> => ({
   build: (ctx) =>
@@ -156,7 +154,7 @@ export const merge = <
 // Feed `dep` into `self`, discharging the requirements `self` shares with what
 // `dep` provides. `dep` builds first; on success `self` builds with the merged
 // context. Errors union; remaining requirements: Exclude<N, P2> | N2.
-export const provideTo = <P, E, N, P2, E2, N2>(
+const provideTo = <P, E, N, P2, E2, N2>(
   self: Layer<P, E, N>,
   dep: Layer<P2, E2, N2>,
 ): Layer<P, E | E2, Exclude<N, P2> | N2> => ({
@@ -168,5 +166,19 @@ export const provideTo = <P, E, N, P2, E2, N2>(
 
 // Build a fully-wired layer. Callable once Needs == never; the AsyncResult still
 // carries `E`, since construction itself may fail — you handle it at the edge.
-export const build = <P, E>(self: Layer<P, E, never>): AsyncResult<Context<P>, E> =>
-  self.build(empty());
+const build = <P, E>(self: Layer<P, E, never>): AsyncResult<Context<P>, E> => self.build(empty());
+
+// ---------------------------------------------------------------------------
+// Public surface, grouped so a reader can tell a Context operation from a Layer
+// one at a glance. `Tag` stays top-level — it names a service, building neither.
+// `Context` and `Layer` are each BOTH a type (above) and a value namespace here
+// (the companion-object pattern): `Context<R>` / `Context.empty()`,
+// `Layer<P, E, N>` / `Layer.make(...)`.
+// ---------------------------------------------------------------------------
+
+// Context constructors. (Reading a service is the instance method `ctx.get(tag)`.)
+export const Context = { empty };
+
+// Layer constructors (`value` / `factory` / `make`), combinators (`merge` /
+// `provideTo`), and the terminal `build`.
+export const Layer = { value, factory, make, merge, provideTo, build };

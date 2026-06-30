@@ -14,8 +14,8 @@ is this library: a `Context<R>` is the typed domain of services you hold, and a
 are tracked in the type system and discharged before you can run**:
 
 1. **Requirements** (`Needs`) — every port a graph still depends on. You cannot
-   `build` until `Needs` is `never`.
-2. **Construction errors** (`E`) — every way wiring can fail. `build` produces an
+   `Layer.build` until `Needs` is `never`.
+2. **Construction errors** (`E`) — every way wiring can fail. `Layer.build` produces an
    `unthrown` `AsyncResult<Context<P>, E>` whose error is the _static union_ of all
    of them, handled once at the edge.
 
@@ -32,20 +32,20 @@ it never re-implements them.
 
 ### 1. Requirements and errors accumulate as unions
 
-`Needs` and `E` are unions. `merge` widens both (`NA | NB`, `EA | EB`). `provideTo`
-**subtracts** from `Needs` with `Exclude<N, P2> | N2` while still unioning `E`
-(`E | E2`). Requirements are modeled as a **union, not an intersection**, precisely
-because TypeScript can remove a union member (`Exclude`) but cannot remove an
+`Needs` and `E` are unions. `Layer.merge` widens both (`NA | NB`, `EA | EB`).
+`Layer.provideTo` **subtracts** from `Needs` with `Exclude<N, P2> | N2` while still
+unioning `E` (`E | E2`). Requirements are modeled as a **union, not an intersection**,
+precisely because TypeScript can remove a union member (`Exclude`) but cannot remove an
 intersection member — discharging a dependency _is_ removing a member, so the union
-encoding is the one that type-checks. `build` is callable only when `Needs` is
-`never`. _(Guarded by the type-level tests: un-wired layer rejected by `build`; the
-error channel of a merged graph is exactly `EA | EB`, not narrowable to one arm.)_
+encoding is the one that type-checks. `Layer.build` is callable only when `Needs` is
+`never`. _(Guarded by the type-level tests: un-wired layer rejected by `Layer.build`;
+the error channel of a merged graph is exactly `EA | EB`, not narrowable to one arm.)_
 
 ### 2. Requirements are declared at boundaries, not inferred from usage
 
 Without a monad there is no `R` channel threaded through every call. Instead a
 consumer **declares the ports it needs** in its `Context<R>` signature
-(`factory(OrderRepository, (ctx: Context<DatabaseService>) => …)`). This is the deliberate trade
+(`Layer.factory(OrderRepository, (ctx: Context<DatabaseService>) => …)`). This is the deliberate trade
 versus Effect's inferred `R`: for hexagonal / DDD code, an explicit port list at the
 boundary is a _feature_, not a limitation. Do not try to infer `Needs` from `ctx.get`
 calls inside a factory body.
@@ -79,15 +79,16 @@ service's shape by name recovers it with
 userland, since `Tag` is exported). Do **not** reintroduce a parallel `interface` per
 service.
 
-### 4. `Layer.build` is a property, not a method — NEVER change this
+### 4. The `Layer` type's `build` member is a property, not a method — NEVER change this
 
-`build` is declared as a **property of function type**
+The `Layer<P, E, N>` type's `build` member (distinct from the `Layer.build(...)`
+runner) is declared as a **property of function type**
 (`readonly build: (ctx: Context<Needs>) => …`), not a method
 (`build(ctx): …`). Method parameters are checked **bivariantly** in TypeScript; a
 method would let a `Context<never>` be passed where a `Context<SomeNeed>` is required
-and an un-wired `Layer` would slip past `build`. A property function type restores
+and an un-wired `Layer` would slip past `Layer.build`. A property function type restores
 strict **contravariance** in `Needs`, which is exactly what makes a missing
-dependency a real compile error. **Never turn `build` into a method.**
+dependency a real compile error. **Never turn the `build` member into a method.**
 
 ### 5. `Context` is contravariant in `R`
 
@@ -97,11 +98,11 @@ services accepts a _richer_ context. _(Guarded by the type-level test.)_
 
 ### 6. Construction qualification mirrors `unthrown`
 
-Async / fallible work enters **only** through `make`, whose factory returns a
+Async / fallible work enters **only** through `Layer.make`, whose factory returns a
 `Result` or `AsyncResult`. A raw `Promise` must **never** enter a combinator: an
 unqualified rejection would silently become a `Defect` instead of a modeled error.
 Re-enter the typed world at the boundary with `fromPromise` / `fromSafePromise`. The
-`make` implementation lifts both sync `Result` and `AsyncResult` uniformly via
+`Layer.make` implementation lifts both sync `Result` and `AsyncResult` uniformly via
 `Ok(undefined).toAsync().flatMap(() => f(ctx))` — no runtime type-sniffing.
 
 ### 7. The constructor family stays distinct
@@ -109,18 +110,27 @@ Re-enter the typed world at the boundary with `fromPromise` / `fromSafePromise`.
 Three constructors, by construction qualification — do **not** collapse them into a
 single value-or-function overload:
 
-- **`value(tag, service)`** — an already-built value. Needs nothing, cannot fail.
-- **`factory(tag, f)`** — built synchronously and infallibly from the context.
-- **`make(tag, f)`** — may fail and/or be async; `f` returns a `Result`/`AsyncResult`
+- **`Layer.value(tag, service)`** — an already-built value. Needs nothing, cannot fail.
+- **`Layer.factory(tag, f)`** — built synchronously and infallibly from the context.
+- **`Layer.make(tag, f)`** — may fail and/or be async; `f` returns a `Result`/`AsyncResult`
   whose error type becomes the layer's `E`.
 
-### 8. `merge` builds in parallel; failure semantics are fixed
+### 8. `Layer.merge` builds in parallel; failure semantics are fixed
 
-`merge` is **variadic** — it combines any number of independent layers (at least one)
-and builds them concurrently via `allAsync`. The **first `Err` short-circuits**; a
+`Layer.merge` is **variadic** — it combines any number of independent layers (at least
+one) and builds them concurrently via `allAsync`. The **first `Err` short-circuits**; a
 thrown value becomes a **`Defect`** (it dominates). Provides, errors, and requirements
 all union across every layer. _(Guarded by the runtime spec: timing interleave, Err
 short-circuit, throw → Defect, and an N-way merge.)_
+
+### 9. Operations are namespaced under `Layer` / `Context`
+
+The public value surface is grouped into companion objects so a reader can tell a
+Layer operation from a Context one: `Layer.{value,factory,make,merge,provideTo,build}`
+and `Context.{empty}`. `Context` and `Layer` are each **both a type and a value**
+(`Context<R>` / `Context.empty()`, `Layer<P, E, N>` / `Layer.make(...)`). `Tag` stays
+top-level — it names a service and builds neither. Do not re-flatten these into
+top-level function exports.
 
 ## Roadmap invariants — NOT yet met (state them so they aren't mistaken for done)
 
