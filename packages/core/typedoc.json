@@ -2,5 +2,5 @@
   "extends": "@demesne/typedoc/base.json",
   "entryPoints": ["src/index.ts"],
   "out": "docs",
-  "intentionallyNotExported": ["TagTypeId", "ContextTypeId"]
+  "intentionallyNotExported": ["TagTypeId", "ContextTypeId", "ProvidesOf", "ErrorOf", "NeedsOf"]
 }

@@ -6,6 +6,10 @@
 > `build` until every dependency is wired, and the set of wiring failures is a static
 > union you handle once at the edge.
 
+📖 **[Documentation](https://btravstack.github.io/demesne/)** ·
+[Guide](https://btravstack.github.io/demesne/guide/getting-started) ·
+[API Reference](https://btravstack.github.io/demesne/api/core/)
+
 ```sh
 pnpm add demesne unthrown
 ```

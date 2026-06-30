@@ -5,6 +5,9 @@
 > services' domain (a typed `Context`) and provides it; requirements and construction
 > errors are tracked in the type system.
 
+📖 **[Documentation](https://btravstack.github.io/demesne/)** ·
+[API Reference](https://btravstack.github.io/demesne/api/core/)
+
 ```sh
 pnpm add demesne unthrown
 ```
