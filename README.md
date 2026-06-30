@@ -70,39 +70,45 @@ Layer constructors, by how construction is qualified:
 
 ## Example
 
-A small graph — a logger, config, a database connection, and an order repository —
-built in five steps. Everything below is one program; it's split only to walk through it.
+demesne maps directly onto a clean / hexagonal architecture: the **domain** stays pure,
+the **application** depends only on **ports**, **adapters** implement those ports, and a
+single **composition root** binds them together. Here is one small use case — fetch an
+order — organised by layer. (It's one program, split by layer for the walk-through.)
 
-### 1. Define the services (ports)
+### Domain
 
-The class **is** the tag; inline the service shape. A service's own operations are
-unthrown results too, so `findById` returns an `AsyncResult` rather than `Order | null`.
+Entities and domain errors. Pure TypeScript — no demesne, no I/O.
 
 ```ts
+// domain/order.ts
+import { TaggedError } from "unthrown";
+
+type Order = { readonly id: string; readonly total: number };
+
+// the order doesn't exist — a domain-level failure, modeled as a value
+class OrderNotFound extends TaggedError("OrderNotFound")<{ id: string }> {}
+```
+
+### Ports
+
+The boundaries the application speaks to, as `Tag`s (the class **is** the tag; the
+shape is inlined). A port's own operations return unthrown results too, so `findById`
+is an `AsyncResult` rather than a bare `Order | null`.
+
+```ts
+// application/ports.ts
 import { Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 
-// Recover a service's shape from its tag when a signature wants it by name.
+// recover a port's shape from its tag when a signature wants it by name
 type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
 
-class LoggerService extends Tag("LoggerService")<
-  LoggerService,
+class Logger extends Tag("Logger")<
+  Logger,
   {
     readonly log: (msg: string) => void;
   }
 >() {}
-
-class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
-
-class DatabaseService extends Tag("DatabaseService")<
-  DatabaseService,
-  {
-    readonly query: (sql: string) => readonly unknown[];
-  }
->() {}
-
-// Order is a domain entity, not a service — it stays a named type.
-type Order = { readonly id: string; readonly total: number };
 
 class OrderRepository extends Tag("OrderRepository")<
   OrderRepository,
@@ -112,56 +118,78 @@ class OrderRepository extends Tag("OrderRepository")<
 >() {}
 ```
 
-### 2. Model the errors
+### Application
 
-Two kinds: failures that can happen while **wiring** (construction), and a failure a
-**wired service** can return from an operation.
+A use case. It **declares the ports it needs** in its `Context<…>` signature
+(requirements at the boundary, not inferred from usage — the deliberate trade vs
+Effect's inferred `R`) and orchestrates them. It never touches an adapter, a concrete
+class, or `process.env`.
 
 ```ts
-import { TaggedError } from "unthrown";
+// application/get-order.ts
+import { type Context } from "demesne";
+import { type AsyncResult } from "unthrown";
 
-// Construction (wiring) errors ...
-class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
-class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
-// ... and an operation error a wired service can return.
-class OrderNotFound extends TaggedError("OrderNotFound")<{ id: string }> {}
+const getOrder = (
+  ctx: Context<Logger | OrderRepository>,
+  id: string,
+): AsyncResult<Order, OrderNotFound> => {
+  ctx.get(Logger).log(`looking up order ${id}`);
+  return ctx.get(OrderRepository).findById(id);
+};
 ```
 
-### 3. Write the layers
+### Adapters
 
-One constructor per construction qualification: `value` (ready), `factory` (sync,
-infallible), `make` (fallible and/or async).
+Concrete `Layer`s that implement the ports — the only layer that touches
+infrastructure. Its own plumbing tags (`AppConfig`, `Database`) and infrastructure
+errors live here, and each constructor matches a construction qualification:
+`Layer.value` (ready), `Layer.make` (fallible / async), `Layer.factory` (sync).
 
 ```ts
-import { type Context, Layer } from "demesne";
-import { Err, fromPromise, Ok, type Result } from "unthrown";
+// adapters/*.ts
+import { type Context, Layer, Tag } from "demesne";
+import { Err, fromPromise, Ok, type Result, TaggedError } from "unthrown";
 
-// Layer.value: a ready service — needs nothing, cannot fail.
-const LoggerLive = Layer.value(LoggerService, { log: (m) => console.log(`[log] ${m}`) });
+// infrastructure-only tags — not application ports
+class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
+class Database extends Tag("Database")<
+  Database,
+  {
+    readonly query: (sql: string) => readonly unknown[];
+  }
+>() {}
 
-// Layer.make: sync but FALLIBLE — returns a Result; its error joins the E channel.
+// infrastructure errors — these surface as the wiring error union
+class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
+class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
+
+// console logger — ready, cannot fail
+const LoggerLive = Layer.value(Logger, { log: (m) => console.log(`[log] ${m}`) });
+
+// env-backed config — sync but fallible
 const ConfigLive = Layer.make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
-  const url = "postgres://localhost/app";
+  const url = "postgres://localhost/app"; // from env in real code
   return url.startsWith("postgres://")
     ? Ok({ dbUrl: url })
-    : Err(new ConfigError({ reason: "DB_URL must be a postgres:// url" }));
+    : Err(new ConfigError({ reason: "DATABASE_URL must be a postgres:// url" }));
 });
 
-// Layer.make: ASYNC and fallible — needs AppConfig; fromPromise qualifies the rejection.
-const connectDb = (url: string): Promise<ServiceOf<typeof DatabaseService>> =>
+// pooled connection — async + fallible; needs AppConfig
+const connectDb = (url: string): Promise<ServiceOf<typeof Database>> =>
   url.includes("localhost")
     ? Promise.resolve({ query: () => [] })
     : Promise.reject(new Error("connection refused"));
 
-const DatabaseLive = Layer.make(DatabaseService, (ctx: Context<AppConfig>) => {
+const DatabaseLive = Layer.make(Database, (ctx: Context<AppConfig>) => {
   const { dbUrl } = ctx.get(AppConfig);
   return fromPromise(connectDb(dbUrl), () => new ConnectionError({ url: dbUrl }));
 });
 
-// Layer.factory: the factory itself is sync + infallible (it just assembles the repo),
-// but the repo's findById returns an AsyncResult carrying a modeled OrderNotFound.
-const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<DatabaseService>) => {
-  const db = ctx.get(DatabaseService);
+// the OrderRepository port, backed by Database. The factory is sync + infallible;
+// the repo's findById returns an AsyncResult carrying a modeled OrderNotFound.
+const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<Database>) => {
+  const db = ctx.get(Database);
   return {
     findById: (id) => {
       const row = db.query(`select * from orders where id = '${id}'`)[0] as Order | undefined;
@@ -171,58 +199,45 @@ const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<DatabaseServi
 });
 ```
 
-### 4. Wire the graph
+### Composition root
 
-`Layer.provideTo` feeds one layer into another and **discharges** the shared
-requirement; `Layer.merge` combines any number of independent layers in one call.
-Requirements and errors accumulate as unions.
+The one place adapters are bound to ports. Wire with `Layer.provideTo` /
+`Layer.merge`, `Layer.build` once at the edge (handling every **wiring** failure as a
+static union), then run the use case against the built `Context`.
 
 ```ts
+// main.ts
 import { Layer } from "demesne";
 
 const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
-//    ^? Layer<DatabaseService, ConnectionError | ConfigError, never>
-const RepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
-const AppLayer = Layer.merge(LoggerLive, RepoWired, DatabaseWired);
-//    ^? Layer<LoggerService | OrderRepository | DatabaseService, ConnectionError | ConfigError, never>
-```
-
-### 5. Build at the edge
-
-`Layer.build` is callable only once `Needs` is `never`. You then handle **two distinct
-unthrown results**: the wiring union from `Layer.build`, and — one level down — each
-service operation's own union.
-
-```ts
-import { Layer } from "demesne";
+const OrderRepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
+const AppLayer = Layer.merge(LoggerLive, OrderRepoWired);
+//    ^? Layer<Logger | OrderRepository, ConnectionError | ConfigError, never>
 
 const wiring = await Layer.build(AppLayer);
-//    ^? Result<Context<LoggerService | OrderRepository | DatabaseService>, ConnectionError | ConfigError>
+//    ^? Result<Context<Logger | OrderRepository>, ConnectionError | ConfigError>
 
 if (wiring.isOk()) {
-  const ctx = wiring.unwrap();
-  ctx.get(LoggerService).log("app wired");
-
-  // A service operation is itself an unthrown AsyncResult — await it and handle
-  // its own error union the same way.
-  const message = await ctx
-    .get(OrderRepository)
-    .findById("order-1")
-    .match({
-      ok: (order) => `found order ${order.id}`,
+  // the built Context provides exactly the ports the use case asks for — and a
+  // richer one would still satisfy it, since Context is contravariant in R.
+  const order = await getOrder(wiring.unwrap(), "order-1");
+  console.log(
+    order.match({
+      ok: (o) => `order ${o.id}: ${o.total}`,
       err: (notFound) => `no such order: ${notFound.id}`,
       defect: (cause) => `query panicked: ${String(cause)}`,
-    });
-  console.log(message);
+    }),
+  );
 } else {
+  // every WIRING failure, handled once as a static union
   const e = wiring.unwrapErr();
   console.error(e._tag === "ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`);
 }
 ```
 
 Forget to wire `ConfigLive`, and `Layer.build(AppLayer)` is a **compile error** —
-`Needs` is not `never`. Add a new fallible `Layer.make`, and its error type appears in
-the union that `match` must handle.
+`Needs` is not `never`. Add a new fallible `Layer.make` anywhere in an adapter, and its
+error type appears in the wiring union that `match` must handle.
 
 ## Design notes
 
