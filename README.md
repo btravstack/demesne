@@ -149,7 +149,7 @@ errors live here, and each constructor matches a construction qualification:
 ```ts
 // adapters/*.ts
 import { type Context, Layer, Tag } from "demesne";
-import { Err, fromPromise, Ok, type Result, TaggedError } from "unthrown";
+import { Err, fromPromise, Ok, TaggedError } from "unthrown";
 
 // infrastructure-only tags — not application ports
 class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
@@ -167,13 +167,15 @@ class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
 // console logger — ready, cannot fail
 const LoggerLive = Layer.value(Logger, { log: (m) => console.log(`[log] ${m}`) });
 
-// env-backed config — sync but fallible
-const ConfigLive = Layer.make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
+// env-backed config — sync but fallible. The service shape comes from the tag and
+// the error type is inferred from the `Err` you return, so neither is annotated.
+const ConfigLive = Layer.make(AppConfig, () => {
   const url = "postgres://localhost/app"; // from env in real code
   return url.startsWith("postgres://")
     ? Ok({ dbUrl: url })
     : Err(new ConfigError({ reason: "DATABASE_URL must be a postgres:// url" }));
 });
+//    ^? Layer<AppConfig, ConfigError, never>
 
 // pooled connection — async + fallible; needs AppConfig
 const connectDb = (url: string): Promise<ServiceOf<typeof Database>> =>

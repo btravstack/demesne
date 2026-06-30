@@ -16,17 +16,16 @@ import { Err, Ok, type Result, TaggedError } from "unthrown";
 // The class IS the tag; the service shape is inlined.
 class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
 
-// Recover the inlined shape by name when a signature wants it.
-type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
-
 class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 
-const ConfigLive = Layer.make(AppConfig, (): Result<ServiceOf<typeof AppConfig>, ConfigError> => {
+// Service comes from the tag; the error type is inferred from the `Err` you return.
+const ConfigLive = Layer.make(AppConfig, () => {
   const url = "postgres://localhost/app";
   return url.startsWith("postgres://")
     ? Ok({ dbUrl: url })
     : Err(new ConfigError({ reason: "DB_URL must be a postgres:// url" }));
 });
+//    ^? Layer<AppConfig, ConfigError, never>
 
 const result = await Layer.build(ConfigLive);
 //    ^? Result<Context<AppConfig>, ConfigError>
