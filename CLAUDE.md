@@ -164,6 +164,42 @@ ones (`never <: Scope`), while still rejecting a real unmet service. Do **not** 
 type-level tests: `build` rejects a resource layer; `scoped` accepts it and a plain one;
 a real unmet service is rejected.)_
 
+## Roadmap — ideas from the wider DI ecosystem
+
+The wiring core is complete. Future work should be borrowed selectively from mature DI
+systems **without** violating the thesis. Prioritized:
+
+1. **`Layer.wire(...layers)` — automatic assembly** (from ZIO `ZLayer.make`, MacWire,
+   google/wire). Given a bag of layers, resolve the DAG and return the fully-provided
+   layer, with a compile error naming any unmet/ambiguous tag. Kills composition-root
+   boilerplate while keeping every type guarantee and boundary declaration. **Highest
+   leverage.**
+2. **Request / child scopes + real lifetimes** (from .NET `scoped`, Inversify request
+   scope, Effect `Scope.fork`). A child scope carved from a built context: shares the
+   singletons, adds request-scoped services, closes LIFO at request end without tearing
+   down the app. The missing lifetime — what makes demesne usable for HTTP servers.
+   Pairs with the existing `Scope` marker.
+3. **Test `override` combinator** (from Guice `Modules.override`, Nest `overrideProvider`,
+   shaku `with_component_override`). `Layer.override(base, patch)` — replace specific
+   tags' providers deep in an assembled graph while keeping the rest.
+4. **Multi-bindings / plugin collections** (from Guice `@IntoSet`, Angular `multi`,
+   .NET keyed services). Accumulate N implementations of a port into a `readonly Item[]`
+   service — for plugin architectures, without a runtime registry.
+5. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
+   Clojure Integrant). An optional `onStart` run after the whole graph is built, ordered
+   topologically — for migrations, warmups, health gating.
+6. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
+
+Already solved elegantly, document it as the answer: **assisted injection**
+(injected deps + call-time args) is the constructor-injected use-case pattern
+(`new UseCase(ports).execute(arg)`) — most frameworks bolt on a whole mechanism for this.
+
+**Do NOT adopt** (they break the thesis): reflection / decorator auto-wiring (trades
+compile-time safety for runtime), a monad / effect runtime (error handling stays with
+`unthrown`), codegen (types already give compile-time safety), or inferring `Needs` from
+usage (requirements are declared at boundaries — `Layer.wire` gives assembly ergonomics
+without giving that up). See `docs/guide/comparison.md` for the full landscape.
+
 ## Toolchain (mirrors `unthrown`)
 
 pnpm + turborepo monorepo. Build with **tsdown** (dual CJS/ESM + `.d.mts`/`.d.cts`).

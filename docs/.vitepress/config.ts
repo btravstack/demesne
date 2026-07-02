@@ -37,6 +37,7 @@ export default defineConfig({
           text: "Introduction",
           items: [
             { text: "Why demesne?", link: "/guide/why-demesne" },
+            { text: "Comparison", link: "/guide/comparison" },
             { text: "Getting Started", link: "/guide/getting-started" },
             { text: "Core Concepts", link: "/guide/core-concepts" },
           ],
