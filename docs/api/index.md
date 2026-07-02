@@ -5,7 +5,7 @@ This reference is generated from the source with
 
 ## Packages
 
-- [**demesne**](./core/) — the core `Tag` / `Context` / `Layer` types, the
+- [**demesne**](./core/) — the core `Tag` / `Context` / `Layer` / `Scope` types, the
   `ServiceOf` helper, the `Layer.value` / `Layer.factory` / `Layer.make` /
   `Layer.acquireRelease` constructors, the `Layer.merge` / `Layer.provideTo`
   combinators, and the terminals `Layer.build` / `Layer.scoped` (plus `Context.empty`).

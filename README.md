@@ -341,6 +341,9 @@ A build threads a **scope** through every layer:
 - **`acquireRelease` + `scoped`** — acquire a resource and register its release;
   `Layer.scoped(layer, use)` builds, runs `use`, then releases every resource in
   reverse order (LIFO), whether `use` succeeded or failed.
+- **Type-level scope enforcement** — `acquireRelease` puts a phantom `Scope` in the
+  layer's requirements, so `Layer.build` **rejects a resource graph at compile time**.
+  You can't accidentally leak — the compiler makes you reach for `Layer.scoped`.
 
 ```ts
 const PoolLive = Layer.acquireRelease(
@@ -348,22 +351,21 @@ const PoolLive = Layer.acquireRelease(
   () => fromPromise(openPool(), (c) => new PoolError({ cause: c })),
   (pool) => pool.close(), // released after `use`, in reverse acquisition order
 );
+//    ^? Layer<Pool, PoolError, Scope>
 
+// Layer.build(provideTo(RepoLive, PoolLive))  // ❌ compile error: needs a Scope
 const summary = await Layer.scoped(provideTo(RepoLive, PoolLive), (ctx) =>
   ctx.get(OrderRepository).findById("order-1"),
 );
 // pool is closed here, even if findById failed
 ```
 
-> `Layer.build` does not close the scope (finalizers never run) — use `Layer.scoped`
-> for graphs with `acquireRelease` layers.
-
 ## Roadmap
 
-The wiring core is complete (memoization and scoped resources included). A possible
-future refinement is **type-level scope enforcement** — tracking a `Scope` requirement
-in the type so `build` rejects unreleased resource layers at compile time (today that's
-a documented convention, not a compile error). See [`CLAUDE.md`](./CLAUDE.md).
+The wiring core is complete: requirements and errors as static unions, variadic `merge`,
+namespaced API, memoization, scoped resources, and **type-level scope enforcement** (the
+compiler rejects a resource graph passed to `build`). Further ideas live in
+[`CLAUDE.md`](./CLAUDE.md).
 
 ## License
 

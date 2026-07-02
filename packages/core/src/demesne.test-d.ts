@@ -8,7 +8,7 @@
 // the core was designed for: absent reads fail, un-wired requirements block
 // `build`, the error channel is the real union, and `Context` is contravariant.
 
-import { type Context, Layer, type ServiceOf, Tag } from "./index.js";
+import { type Context, Layer, type Scope, type ServiceOf, Tag } from "./index.js";
 import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
 
 // --- assertion helpers -------------------------------------------------------
@@ -92,24 +92,33 @@ const wantsAB = (_: Context<ServiceA | ServiceB>): void => {};
 // @ts-expect-error - a Context<ServiceA> cannot satisfy a consumer needing ServiceA | ServiceB.
 wantsAB(poor);
 
-// --- 5. acquireRelease + scoped ----------------------------------------------
+// --- 5. acquireRelease + scoped: type-level scope enforcement ----------------
 
-// acquireRelease produces a fallible layer; its error and needs come from `acquire`.
+// acquireRelease carries `Scope` in its Needs (its error/service come from acquire).
 const resourceLayer = Layer.acquireRelease(
   ServiceA,
   (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }),
   () => {},
 );
-type _resource = Expect<Equal<typeof resourceLayer, Layer<ServiceA, EA, never>>>;
+type _resource = Expect<Equal<typeof resourceLayer, Layer<ServiceA, EA, Scope>>>;
 
-// scoped runs `use` against the built Context and unions the error channels.
+// `build` REJECTS a scope-needing graph — it must be consumed with `scoped`.
+// @ts-expect-error - build requires Needs = never; the graph still needs a Scope.
+Layer.build(resourceLayer);
+
+// `scoped` discharges the Scope, runs `use`, and unions the error channels.
 const scopedResult = Layer.scoped(
   resourceLayer,
   (ctx): Result<string, EB> => Ok(ctx.get(ServiceA).a),
 );
 type _scoped = Expect<Equal<typeof scopedResult, AsyncResult<string, EA | EB>>>;
 
-// scoped is callable only when Needs is never, exactly like build.
+// `scoped` also accepts a scope-free layer (Needs = never is assignable to Scope).
+declare const plain: Layer<ServiceA, EA, never>;
+const scopedPlain = Layer.scoped(plain, (): Result<number, never> => Ok(1));
+type _scopedPlain = Expect<Equal<typeof scopedPlain, AsyncResult<number, EA>>>;
+
+// ...but a real unmet service is still rejected (only `never` / `Scope` are allowed).
 declare const unwiredResource: Layer<ServiceA, never, ServiceB>;
-// @ts-expect-error - scoped requires Needs = never; ServiceB is still unmet.
+// @ts-expect-error - scoped still requires real services (ServiceB) to be wired first.
 Layer.scoped(unwiredResource, (): Result<number, never> => Ok(1));

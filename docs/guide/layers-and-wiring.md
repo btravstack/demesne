@@ -116,10 +116,12 @@ const PoolLive = Layer.acquireRelease(
   () => fromPromise(openPool(), (cause) => new PoolError({ cause })),
   (pool) => pool.end(),
 );
+//    ^? Layer<Pool, PoolError, Scope>
 
 const result = await Layer.scoped(PoolLive, (ctx) => useThePool(ctx.get(Pool)));
 // pool released here, whatever the outcome
 ```
 
-`Layer.build` does **not** close the scope, so consume resource graphs with
-`Layer.scoped`. Full details in [Resources & Scopes](./roadmap).
+`acquireRelease` puts a phantom `Scope` in the layer's requirements, so `Layer.build`
+**rejects a resource graph at compile time** — you're forced to use `Layer.scoped`.
+Full details in [Resources & Scopes](./roadmap).

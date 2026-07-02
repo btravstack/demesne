@@ -51,13 +51,35 @@ Notes:
 
 - **`release` is expected to be infallible.** Teardown is best-effort: a throwing
   release does not abort the others.
-- **`Layer.build` does not close the scope.** Its finalizers never run, so consume
-  graphs that contain `acquireRelease` layers with **`Layer.scoped`**, not `Layer.build`.
+
+## Type-level scope enforcement
+
+You can't accidentally leak a resource, because the **types** force you to use `scoped`.
+`acquireRelease` returns a layer whose requirements include a phantom **`Scope`** — the
+same technique Effect uses (`Scope` in the `R` channel):
+
+```ts
+const PoolLive = Layer.acquireRelease(Pool, acquire, release);
+//    ^? Layer<Pool, PoolError, Scope>
+```
+
+`merge` and `provideTo` propagate that `Scope` (no layer ever _provides_ it), so any
+graph containing a resource layer carries `Scope` in its requirements. And since
+`Layer.build` is callable only when requirements are `never`, it **rejects a resource
+graph at compile time**:
+
+```ts
+Layer.build(PoolLive);
+//          ^^^^^^^^ ❌ Type error — the graph needs a Scope; use Layer.scoped
+
+await Layer.scoped(PoolLive, use); // ✅ discharges the Scope and closes it
+```
+
+`Layer.scoped` accepts both scope-needing graphs and scope-free ones (`never` is
+assignable to `Scope`), while still rejecting a graph with a real unmet service. So the
+"remember to use `scoped`" convention is now a compile error, not a footgun.
 
 ## Future
 
-One refinement remains on the roadmap: **type-level scope enforcement**. Today `build`
-will run a graph containing `acquireRelease` layers and silently drop their finalizers —
-only `scoped` closes the scope. A future version could track a `Scope` requirement in the
-type (the way Effect tracks it in `R`) so `build` rejects scope-needing layers at compile
-time. For now it's a documented convention, not a compile error.
+The wiring core is complete. Further ideas will be tracked in the repository's
+`CLAUDE.md`.

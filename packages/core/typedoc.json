@@ -5,9 +5,10 @@
   "intentionallyNotExported": [
     "TagTypeId",
     "ContextTypeId",
+    "ScopeTypeId",
+    "BuildState",
     "ProvidesOf",
     "ErrorOf",
-    "NeedsOf",
-    "Scope"
+    "NeedsOf"
   ]
 }

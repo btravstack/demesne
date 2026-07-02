@@ -133,9 +133,10 @@ type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
 `Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
 not re-flatten these into top-level function exports.
 
-### 10. A `Scope` is threaded through every build (memoization + teardown)
+### 10. A `BuildState` is threaded through every build (memoization + teardown)
 
-Every `build` receives a `Scope` carrying a **memo map** and a **finalizer list**.
+Every `build` receives an internal `BuildState` carrying a **memo map** and a
+**finalizer list**.
 
 - **Memoization.** `buildMemo` keys layers by **reference**: a layer shared across
   branches (same object) constructs **once** per build, and the in-flight `AsyncResult`
@@ -146,16 +147,22 @@ Every `build` receives a `Scope` carrying a **memo map** and a **finalizer list*
   with the scope. `scoped(layer, use)` builds, runs `use`, then closes the scope —
   running finalizers in **reverse acquisition order (LIFO)**, whether `use` succeeded,
   failed, or the build failed partway. `release` is expected to be infallible; teardown
-  is best-effort (a throwing release does not abort the others). `build` does **not**
-  close the scope, so resource layers must be consumed with `scoped`. _(Guarded by the
-  spec: LIFO order, release-on-failure, best-effort teardown.)_
+  is best-effort (a throwing release does not abort the others). _(Guarded by the spec:
+  LIFO order, release-on-failure, best-effort teardown.)_
 
-## Roadmap (future ideas, not yet built)
+### 11. `Scope` is a phantom requirement — `build` rejects unreleased resources
 
-- **Type-level scope enforcement.** Today `build` will happily run a graph containing
-  `acquireRelease` layers and silently drop their finalizers; only `scoped` closes the
-  scope. A future refinement could track a `Scope` requirement in the type (à la
-  Effect's `R`) so `build` rejects scope-needing layers at compile time.
+`acquireRelease` returns `Layer<Self, E, Needs | Scope>`, where **`Scope`** is a phantom
+marker (never a runtime value) tracked in the `Needs` channel — the same trick Effect
+uses with `Scope` in `R`. `merge` / `provideTo` propagate it (no layer ever _provides_
+`Scope`), so any graph containing a resource layer carries `Scope` in `Needs`. Because
+`build` requires `Needs = never`, it is a **compile error** to `build` a scope-needing
+graph — it can never silently drop finalizers. `scoped` takes `Layer<P, E, Scope>`,
+which (by `Layer`'s covariance in `Needs`) accepts both `Scope` graphs and scope-free
+ones (`never <: Scope`), while still rejecting a real unmet service. Do **not** relax
+`scoped` back to `Needs = never` or drop `Scope` from `acquireRelease`. _(Guarded by the
+type-level tests: `build` rejects a resource layer; `scoped` accepts it and a plain one;
+a real unmet service is rejected.)_
 
 ## Toolchain (mirrors `unthrown`)
 

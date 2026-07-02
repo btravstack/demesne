@@ -108,24 +108,36 @@ export interface Layer<Provides, E = never, Needs = never> {
   // Property (not method) on purpose: method params are checked bivariantly,
   // which would let an un-wired Layer slip past. A property function type keeps
   // strict contravariance in `Needs`, so a missing dependency is a real error.
-  // The `Scope` (memoization + finalizers) is threaded through every build.
-  readonly build: (ctx: Context<Needs>, scope: Scope) => AsyncResult<Context<Provides>, E>;
+  // The `BuildState` (memoization + finalizers) is threaded through every build.
+  readonly build: (ctx: Context<Needs>, state: BuildState) => AsyncResult<Context<Provides>, E>;
 }
 
 // ---------------------------------------------------------------------------
-// Scope — the per-build runtime state, threaded through every `build`:
+// Scope — a phantom requirement tracked in the `Needs` channel (à la Effect's
+// `Scope` in `R`). `acquireRelease` adds it, so any graph containing a resource
+// layer carries `Scope` in `Needs`, and `merge` / `provideTo` propagate it. Since
+// `build` requires `Needs = never`, it REJECTS a scope-needing graph at compile
+// time; only `scoped` — which closes the scope — discharges it. Never has a value.
+// ---------------------------------------------------------------------------
+declare const ScopeTypeId: unique symbol;
+export interface Scope {
+  readonly [ScopeTypeId]: typeof ScopeTypeId;
+}
+
+// ---------------------------------------------------------------------------
+// BuildState — the per-build runtime state, threaded through every `build`:
 //   • memoMap : each layer constructs ONCE per build. Combinators look a child
 //     up by reference before building it, so a layer shared across branches is
 //     constructed a single time (and the in-flight AsyncResult is shared).
 //   • finalizers : release thunks registered by `acquireRelease`, run in reverse
 //     acquisition order (LIFO) when the scope closes — see `scoped`.
 // ---------------------------------------------------------------------------
-interface Scope {
+interface BuildState {
   readonly memoMap: Map<Layer<any, any, any>, AsyncResult<Context<any>, any>>;
   readonly finalizers: (() => Promise<void>)[];
 }
 
-const makeScope = (): Scope => ({ memoMap: new Map(), finalizers: [] });
+const makeBuildState = (): BuildState => ({ memoMap: new Map(), finalizers: [] });
 
 // Build a layer at most once per scope, keyed by layer reference. Storing the
 // in-flight AsyncResult (not the resolved Context) means concurrent branches that
@@ -133,19 +145,19 @@ const makeScope = (): Scope => ({ memoMap: new Map(), finalizers: [] });
 const buildMemo = <P, E, N>(
   layer: Layer<P, E, N>,
   ctx: Context<N>,
-  scope: Scope,
+  state: BuildState,
 ): AsyncResult<Context<P>, E> => {
-  const cached = scope.memoMap.get(layer);
+  const cached = state.memoMap.get(layer);
   if (cached !== undefined) return cached as AsyncResult<Context<P>, E>;
-  const result = layer.build(ctx, scope);
-  scope.memoMap.set(layer, result);
+  const result = layer.build(ctx, state);
+  state.memoMap.set(layer, result);
   return result;
 };
 
 // Run a scope's finalizers in reverse acquisition order (LIFO). Teardown is
 // best-effort: a release that throws does not abort the rest.
-const closeScope = async (scope: Scope): Promise<void> => {
-  for (const finalizer of [...scope.finalizers].reverse()) {
+const closeScope = async (state: BuildState): Promise<void> => {
+  for (const finalizer of [...state.finalizers].reverse()) {
     try {
       await finalizer();
     } catch {
@@ -185,21 +197,21 @@ const make = <Self, Service, E, Needs = never>(
       .map((service) => unsafeAdd(emptyAny(), tag.key, service)),
 });
 
-// A layer that ACQUIRES a resource and registers its RELEASE with the scope.
-// Releases run in reverse acquisition order when the scope closes. `release` is
-// expected to be infallible. Consume acquireRelease layers with `Layer.scoped`,
-// which closes the scope — `Layer.build` never does, so its finalizers never run.
+// A layer that ACQUIRES a resource and registers its RELEASE with the scope. It
+// carries `Scope` in its `Needs`, so `build` rejects any graph containing it — the
+// graph must be consumed with `scoped`, which closes the scope (releases run in
+// reverse acquisition order). `release` is expected to be infallible.
 const acquireRelease = <Self, Service, E, Needs = never>(
   tag: Tag<Self, Service>,
   acquire: (ctx: Context<Needs>) => Result<Service, E> | AsyncResult<Service, E>,
   release: (service: Service) => void | Promise<void>,
-): Layer<Self, E, Needs> => ({
-  build: (ctx, scope) =>
+): Layer<Self, E, Needs | Scope> => ({
+  build: (ctx, state) =>
     Ok<void>(undefined)
       .toAsync()
-      .flatMap(() => acquire(ctx))
+      .flatMap(() => acquire(ctx as Context<Needs>))
       .map((service) => {
-        scope.finalizers.push(async () => {
+        state.finalizers.push(async () => {
           await release(service);
         });
         return unsafeAdd(emptyAny(), tag.key, service);
@@ -218,10 +230,10 @@ type NeedsOf<L> = L extends Layer<any, any, infer N> ? N : never;
 const merge = <Ls extends readonly [Layer<any, any, any>, ...Layer<any, any, any>[]]>(
   ...layers: Ls
 ): Layer<ProvidesOf<Ls[number]>, ErrorOf<Ls[number]>, NeedsOf<Ls[number]>> => ({
-  build: (ctx, scope) =>
+  build: (ctx, state) =>
     allAsync(
       (layers as readonly Layer<any, any, any>[]).map((layer) =>
-        buildMemo(layer, ctx as Context<any>, scope),
+        buildMemo(layer, ctx as Context<any>, state),
       ),
     ).map((contexts) =>
       (contexts as Context<any>[]).reduce((merged, c) => mergeContext(merged, c), emptyAny()),
@@ -235,32 +247,34 @@ const provideTo = <P, E, N, P2, E2, N2>(
   self: Layer<P, E, N>,
   dep: Layer<P2, E2, N2>,
 ): Layer<P, E | E2, Exclude<N, P2> | N2> => ({
-  build: (ctx, scope) =>
-    buildMemo(dep, ctx as Context<any>, scope).flatMap((depCtx) =>
-      buildMemo(self, mergeContext(ctx, depCtx) as Context<N>, scope),
+  build: (ctx, state) =>
+    buildMemo(dep, ctx as Context<any>, state).flatMap((depCtx) =>
+      buildMemo(self, mergeContext(ctx, depCtx) as Context<N>, state),
     ),
 });
 
-// Build a fully-wired layer. Callable once Needs == never; the AsyncResult still
-// carries `E`, since construction itself may fail — you handle it at the edge.
-// Shared layers construct once. NOTE: `build` does not close the scope, so any
-// `acquireRelease` finalizers never run — use `scoped` for resource layers.
+// Build a fully-wired layer. Callable once `Needs` is `never` — a graph that still
+// needs a `Scope` (contains `acquireRelease` layers) is a COMPILE error here; use
+// `scoped`. The AsyncResult still carries `E`. Shared layers construct once.
 const build = <P, E>(self: Layer<P, E, never>): AsyncResult<Context<P>, E> =>
-  buildMemo(self, empty(), makeScope());
+  buildMemo(self, empty(), makeBuildState());
 
-// Build a fully-wired layer, run `use` with the resulting Context, then CLOSE the
-// scope — releasing every acquired resource in reverse order, whether `use`
-// succeeded, failed, or the build itself failed partway. The bracket that makes
-// `acquireRelease` safe.
+// Build a scoped layer, run `use` with the resulting Context, then CLOSE the scope
+// — releasing every acquired resource in reverse order, whether `use` succeeded,
+// failed, or the build failed partway. Discharges the `Scope` requirement, so this
+// is how you consume `acquireRelease` graphs. Also accepts scope-free layers
+// (`Needs = never`), since `never` is assignable to `Scope`.
 const scoped = <P, E, A, E2>(
-  self: Layer<P, E, never>,
+  self: Layer<P, E, Scope>,
   use: (ctx: Context<P>) => Result<A, E2> | AsyncResult<A, E2>,
 ): AsyncResult<A, E | E2> => {
-  const scope = makeScope();
+  const state = makeBuildState();
   return fromSafePromise(
     (async (): Promise<Result<A, E | E2>> => {
-      const result = await buildMemo(self, empty(), scope).flatMap((ctx) => use(ctx));
-      await closeScope(scope);
+      // `emptyAny()` (not `empty()`) because `self` needs `Context<Scope>`; the
+      // phantom Scope never has a runtime value, so an empty context satisfies it.
+      const result = await buildMemo(self, emptyAny(), state).flatMap((ctx) => use(ctx));
+      await closeScope(state);
       return result;
     })(),
   ).flatMap((result) => result.toAsync());
