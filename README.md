@@ -1,21 +1,35 @@
+<div align="center">
+
+<img src="docs/public/logo.svg" alt="demesne" width="128" height="128" />
+
 # demesne
 
-> **Type-safe dependency injection — the wiring sibling of [`unthrown`](https://github.com/btravstack/unthrown).**
-> A container holds your services' domain (a typed `Context`) and provides it.
-> Requirements **and** construction errors are tracked in the type system: you cannot
-> `build` until every dependency is wired, and the set of wiring failures is a static
-> union you handle once at the edge.
+**Type-safe dependency injection for [TypeScript](https://www.typescriptlang.org/) — requirements and construction errors tracked in the type system**
 
-📖 **[Documentation](https://btravstack.github.io/demesne/)** ·
-[Guide](https://btravstack.github.io/demesne/guide/getting-started) ·
-[API Reference](https://btravstack.github.io/demesne/api/core/)
+[![CI](https://github.com/btravstack/demesne/actions/workflows/ci.yml/badge.svg)](https://github.com/btravstack/demesne/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/demesne.svg?logo=npm)](https://www.npmjs.com/package/demesne)
+[![npm downloads](https://img.shields.io/npm/dm/demesne.svg)](https://www.npmjs.com/package/demesne)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+[**Documentation**](https://btravstack.github.io/demesne/) · [**Get Started**](https://btravstack.github.io/demesne/guide/getting-started) · [**Why demesne?**](https://btravstack.github.io/demesne/guide/why-demesne)
+
+</div>
+
+A _demesne_ is the domain a lord holds in his own hands and provisions directly. So is
+this: a container holds your services' domain (a typed `Context`) and provides it — you
+cannot `build` until every dependency is wired, and every way construction can fail is a
+static union you handle once at the edge. demesne does the wiring; its sibling
+[`unthrown`](https://github.com/btravstack/unthrown) does the error handling.
+
+## Install
 
 ```sh
 pnpm add demesne unthrown
 ```
 
-`unthrown` is a peer dependency — demesne builds to an `unthrown` `AsyncResult`, so
-async and failure are first-class while error handling stays delegated to `unthrown`.
+`unthrown` is a peer dependency — demesne builds to an `unthrown` `AsyncResult`, so async
+and failure are first-class while error handling stays delegated to it.
 
 ## The problem
 
