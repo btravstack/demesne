@@ -1,7 +1,7 @@
-// End-to-end HTTP tests with NO database. Because the application depends on the
-// `TodoRepository` *port*, we wire an in-memory fake in its place — no Prisma, no Postgres —
-// and drive the real Hono app with `app.request(...)`. This exercises the whole integration
-// (demesne wiring → use case → unthrown Result → Hono response) and every status mapping.
+// End-to-end HTTP tests with NO database. They go through the SAME `bootstrap` as the server
+// (src/app.ts) — the identical wiring, use cases and routes — swapping only the repository
+// for an in-memory fake. Because the application depends on the `TodoRepository` *port*, the
+// fake drops in without Prisma or Postgres, and `app.request(...)` drives the real Hono app.
 
 import { describe, expect, it } from "vitest";
 
@@ -10,11 +10,8 @@ import type { Hono } from "hono";
 import { Err, Ok } from "unthrown";
 
 import { TodoRepository } from "./application/ports.js";
-import { CreateTodoLive } from "./application/create-todo.js";
-import { GetTodoLive } from "./application/get-todo.js";
-import { ListTodosLive } from "./application/list-todos.js";
+import { bootstrap } from "./bootstrap.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
-import { LoggerLive } from "./infra/logger.js";
 import { buildRoutes } from "./http/routes.js";
 
 // An in-memory stand-in for the Prisma-backed repository — same port, no I/O.
@@ -46,17 +43,10 @@ const makeFakeRepo = (): ServiceOf<TodoRepository> => {
   };
 };
 
-// Wire the app with the fake repository and a plain logger — no Config, no Database, so it
-// builds without a `Scope` and needs no Postgres.
+// Build the SAME app the server builds, but with the fake repository in place of Prisma.
+// The fake needs nothing, so this graph has no `Scope` and builds without a database.
 const buildTestApp = async () => {
-  const TestApp = Layer.wire(
-    LoggerLive,
-    Layer.value(TodoRepository, makeFakeRepo()),
-    ListTodosLive,
-    GetTodoLive,
-    CreateTodoLive,
-  );
-  const ctx = (await Layer.build(TestApp)).unwrap();
+  const ctx = (await Layer.build(bootstrap(Layer.value(TodoRepository, makeFakeRepo())))).unwrap();
   return buildRoutes(ctx);
 };
 
