@@ -14,11 +14,16 @@ type AuditSink = { readonly name: string; readonly record: (event: AuditEvent) =
 export class AuditSinks extends Tag("AuditSinks")<AuditSinks, readonly AuditSink[]>() {}
 
 // One contribution, built from the port it needs (the Logger). `member` mirrors `factory`:
-// synchronous and infallible, providing the collection tag with a single item.
-const ConsoleAuditLive = Layer.member(AuditSinks, (ctx: Context<Logger>) => ({
-  name: "console",
-  record: (event) => ctx.get(Logger).info(`audit ${event.action}: ${event.detail}`),
-}));
+// synchronous and infallible, providing the collection tag with a single item. It reads the
+// Logger at build time (capturing the value), so `wire` defers this member a round until the
+// Logger is available — no `provideTo` needed.
+const ConsoleAuditLive = Layer.member(AuditSinks, (ctx: Context<Logger>) => {
+  const logger = ctx.get(Logger);
+  return {
+    name: "console",
+    record: (event) => logger.info(`audit ${event.action}: ${event.detail}`),
+  };
+});
 
 // Another contribution, self-contained.
 const InMemoryAuditLive = Layer.member(AuditSinks, () => {

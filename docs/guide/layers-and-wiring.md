@@ -109,10 +109,14 @@ self-contained set is `Needs = never` (ready to `build`), and a missing dependen
 in the type — `build` names it as a compile error.
 
 ::: tip Runtime & limits
-wire builds each layer once a round against the services built so far (a layer that reads
-a not-yet-built dependency is deferred), so **order doesn't matter**. A first `Err`
-short-circuits; a genuine dependency **cycle** surfaces as a `Defect` at runtime (the
-types can't catch cycles). Pass the individual `*Live` layers — not pre-composed ones.
+wire builds each layer a round at a time against the services built so far (a layer that
+reads a not-yet-built dependency is deferred), so **order doesn't matter**. A first `Err`
+short-circuits; a genuine dependency **cycle** surfaces as a `Defect` that names the
+services involved (the types can't catch cycles). Composed layers (`onStart`, `collect`,
+`provideTo`, …) are fine as members. One caveat: because a deferred layer's build is
+**re-run** each round, a factory / `acquire` passed to wire should be idempotent and read
+its dependencies **before** any side effect — otherwise the effect repeats (and an
+`acquire` that opens a resource before reading a deferred dep leaks it).
 :::
 
 ### `Layer.override` — swap providers in an assembled graph

@@ -142,8 +142,9 @@ describe("wired combinators on the same app", () => {
     const logs: string[] = [];
     const SpyLogger = Layer.value(Logger, { info: (msg) => void logs.push(msg) });
 
-    // fakeApp() is a `Layer.wire` result, so override can re-assemble it with the spy. The
-    // GetTodo interactor captured Logger in its constructor, so it logs to the spy (deep).
+    // fakeApp() is a `Layer.wire` result, so override can re-assemble it with the spy —
+    // deeply: every consumer (the GetTodo interactor, the audit sink) that captured Logger
+    // at construction now sees the spy.
     const ctx = (await Layer.build(Layer.override(fakeApp(), [SpyLogger]))).unwrap();
     await ctx.get(GetTodo).execute("seed-1");
 

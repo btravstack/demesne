@@ -450,10 +450,50 @@ describe("Layer.wire: automatic assembly", () => {
     );
 
     // Types allow it (Needs = Exclude<TagX | TagY, TagX | TagY> = never); the cycle is a
-    // runtime Defect.
+    // runtime Defect that NAMES the cyclic services (the type system can't catch cycles).
     const result = await Layer.build(Layer.wire(X, Y));
 
-    expect(result.isDefect()).toBe(true);
+    const message = result.match({
+      ok: () => "ok",
+      err: () => "err",
+      defect: (cause) => String(cause),
+    });
+    expect(message).toContain("dependency cycle among the services [TagX, TagY]");
+  });
+
+  it("resolves a composite layer (onStart over a make) whose dep is a wire sibling", async () => {
+    // A make wrapped in onStart, needing a sibling: the composition that used to poison
+    // wire's shared memo across deferral rounds and surface a FALSE "dependency cycle".
+    // buildMemo now evicts MissingDependency Defects, so it resolves.
+    const ConfigLive = Layer.make(
+      AppConfig,
+      (): Result<ServiceOf<typeof AppConfig>, never> => Ok({ dbUrl: "postgres://localhost/app" }),
+    );
+    const DbBase = Layer.make(DatabaseService, (ctx: Context<AppConfig>) => {
+      ctx.get(AppConfig); // deferred until AppConfig is built
+      return Ok<ServiceOf<typeof DatabaseService>>({ query: () => [] }).toAsync();
+    });
+    const DbLive = Layer.onStart(DbBase, (): Result<void, never> => Ok(undefined));
+
+    const result = await Layer.build(Layer.wire(ConfigLive, DbLive));
+
+    expect(result.isOk()).toBe(true);
+  });
+
+  it("resolves a collect whose member needs a wire sibling", async () => {
+    class Sink extends Tag("WireSink")<Sink, { readonly n: number }>() {}
+    type Item = { readonly n: number };
+    class Items extends Tag("WireItems")<Items, readonly Item[]>() {}
+
+    const SinkLive = Layer.value(Sink, { n: 5 });
+    const M1 = Layer.member(Items, (ctx: Context<Sink>) => ({ n: ctx.get(Sink).n }));
+    const M2 = Layer.member(Items, () => ({ n: 2 }));
+
+    // collect's member reads Sink from a sibling — previously required a `provideTo`
+    // work-around, now resolves directly.
+    const ctx = (await Layer.build(Layer.wire(SinkLive, Layer.collect(Items, [M1, M2])))).unwrap();
+
+    expect(ctx.get(Items).map((i) => i.n)).toEqual([5, 2]);
   });
 
   it("orders wired acquireRelease layers and releases them in reverse (LIFO)", async () => {

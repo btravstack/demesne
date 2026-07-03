@@ -144,6 +144,16 @@ Every `build` receives an internal `BuildState` carrying a **memo map** and a
   is reused (so concurrent `merge` branches don't double-build). The memo map is
   per-`build`/`scoped` call — separate builds reconstruct. _(Guarded by the spec: a
   layer shared across two branches constructs once; separate builds reconstruct.)_
+- **Self-heal for `wire` deferral.** `buildMemo` **evicts** a cached result that resolves
+  to a `MissingDependency` Defect (`result.tapDefect(...)`). This is load-bearing: `wire`
+  discovers order by re-running `build` each round, and a `make`/`acquireRelease` nested
+  through a `buildMemo`-combinator (`onStart`/`onStop`/`collect`/`merge`/`provideTo`) turns
+  a not-yet-ready read into an **async** Defect that `buildMemo` caches _before_ it rejects;
+  without eviction the poisoned entry makes the layer defer forever and `wire` reports a
+  **false "dependency cycle"**. Do **not** remove the eviction — it is why a composite may
+  be a direct `wire` member. Outside wire/override no `MissingDependency` ever occurs, so it
+  is inert there. _(Guarded by the spec: `onStart`-over-`make` and `collect` whose member
+  needs a wire sibling both resolve.)_
 - **Ordered teardown.** `acquireRelease(tag, acquire, release)` registers `release`
   with the scope. `scoped(layer, use)` builds, runs `use`, then closes the scope —
   running finalizers in **reverse acquisition order (LIFO)**, whether `use` succeeded,
@@ -194,8 +204,13 @@ runtime: build the patches first (against the outer context), collect the keys t
 introduce or change into a **protected set**, then re-run `resolveWire` over the base's
 source layers with those keys seeded and locked — every base provider still runs (its
 finalizers register) but its value for a protected key is discarded, so consumers read the
-patched value. Patches may depend only on services **outside** the base (not double-building
-the base). Provides `P | Ps`, errors union, `Needs = Exclude<N | Ns, Ps>`. **Infer the base
+patched value. **Consequence (do not misuse):** because the base provider's body still runs,
+`override` **cannot escape a _failing_ or unavailable real provider** — if the base provider
+for a patched tag errors (e.g. a DB adapter that can't connect), the whole `override` fails
+even though the patch fully supplies the tag. To test against a broken/absent dependency,
+**assemble a fresh graph with the fake** (parameterize the graph by the provider — the
+`bootstrap(repository)` pattern), not `override`. Patches may depend only on services
+**outside** the base (not double-building the base). Provides `P | Ps`, errors union, `Needs = Exclude<N | Ns, Ps>`. **Infer the base
 as a whole `B extends WiredLayer<any,any,any>` and pull channels with `ProvidesOf`/`ErrorOf`/
 `NeedsOf`** — do **not** infer `N` from a `WiredLayer<P,E,N>` parameter directly (it sits in
 a contravariant position and degrades to `any`). _(Guarded by the spec: deep replace,
@@ -251,8 +266,15 @@ keeps `Needs`; `onStop` adds `Scope` so `build` rejects it and `scoped` accepts 
 The wiring core is complete. Five roadmap items are **now implemented**: `Layer.wire`
 (automatic assembly) provides the union of every service, unions errors, and leaves
 `Needs = Exclude<allNeeds, allProvides>`, resolving order in rounds at runtime (a layer
-reading a not-yet-built dep is deferred; a cycle is a runtime `Defect`) — do **not** try
-to make it topologically sort by types (they're erased) or memoize failed attempts;
+reading a not-yet-built dep is deferred; an unresolvable set is a runtime `Defect` naming
+the cyclic services) — do **not** try to make it topologically sort by types (they're
+erased). A composite (`onStart`/`collect`/`provideTo`/…) **may** be a direct `wire` member
+(the memo self-heals — see invariant #10), but note the **idempotency constraint**: `wire`
+re-runs a deferred layer's `build` each round, so any factory/`acquire` passed (even
+transitively) to `wire` must be side-effect-idempotent and **read all its deps before any
+effect** — otherwise the effect repeats, and an `acquire` that opens a resource before
+reading a deferred dep **leaks** it (opened before the deferring read registers the
+finalizer). Also do **not** memoize _genuine_ failures;
 `Layer.forkScope` (request / child scopes, see invariant #12); `Layer.override` (the
 test override combinator, see invariant #13); `Layer.member` / `Layer.collect`
 (multi-bindings, see invariant #14); and `Layer.onStart` / `Layer.onStop` (lifecycle

@@ -13,14 +13,10 @@ import { AuditSinksLive } from "./application/plugins.js";
 import { TodoRepository } from "./application/ports.js";
 import { LoggerLive } from "./infra/logger.js";
 
-// The audit-sink collection needs the Logger its console sink reads. `collect` is a composite
-// (it eagerly builds its members), so — unlike a leaf layer — `wire` can't defer it a round
-// while Logger is built. Satisfy that need with `provideTo` up front.
-const AuditSinksWired = Layer.provideTo(AuditSinksLive, LoggerLive);
-
 // Assemble the app around a `repository` layer (any provider of the TodoRepository port).
 // Generic over the whole repository layer so its provisions/errors/requirements flow into the
 // result — the Prisma repository additionally provides Config/Database and needs a Scope; the
-// fake provides only the port and needs nothing.
+// fake provides only the port and needs nothing. `AuditSinksLive` (a `collect`) reads its
+// Logger from a sibling here — wire defers and resolves it like any other member.
 export const bootstrap = <R extends Layer<TodoRepository, unknown, unknown>>(repository: R) =>
-  Layer.wire(LoggerLive, AuditSinksWired, repository, ListTodosLive, GetTodoLive, CreateTodoLive);
+  Layer.wire(LoggerLive, AuditSinksLive, repository, ListTodosLive, GetTodoLive, CreateTodoLive);

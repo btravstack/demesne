@@ -180,6 +180,16 @@ const buildMemo = <P, E, N>(
   if (cached !== undefined) return cached as AsyncResult<Context<P>, E>;
   const result = layer.build(ctx, state);
   state.memoMap.set(layer, result);
+  // Self-heal for `wire` / `override` resolution: a `MissingDependency` Defect means the
+  // layer was built in a deferral round before its deps existed. Evict the cached failure
+  // so a later round rebuilds it against a fuller context — otherwise the poisoned entry
+  // would make the layer defer forever and `wire` would report a false "dependency cycle".
+  // (Outside wire/override no `MissingDependency` ever occurs, so this is inert there.)
+  result.tapDefect((cause) => {
+    if (cause instanceof MissingDependency && state.memoMap.get(layer) === result) {
+      state.memoMap.delete(layer);
+    }
+  });
   return result;
 };
 
@@ -370,23 +380,24 @@ const resolveWire = async (
         try {
           const result = await layer.build(probe, state);
           if (result.isOk()) return { layer, ctx: result.unwrap() };
+          // The `MissingDependency` message IS the tag key the layer is waiting on.
           if (result.isDefect() && result.cause instanceof MissingDependency) {
-            return { layer, pending: true };
+            return { layer, waitingFor: result.cause.message };
           }
           return { fail: result };
         } catch (thrown) {
-          if (thrown instanceof MissingDependency) return { layer, pending: true };
+          if (thrown instanceof MissingDependency) return { layer, waitingFor: thrown.message };
           throw thrown;
         }
       }),
     );
 
-    const pending: Layer<any, any, any>[] = [];
+    const pending: { layer: Layer<any, any, any>; waitingFor: string }[] = [];
     let progressed = false;
     for (const outcome of outcomes) {
       if ("fail" in outcome) return outcome.fail;
-      if ("pending" in outcome) {
-        pending.push(outcome.layer);
+      if ("waitingFor" in outcome) {
+        pending.push({ layer: outcome.layer, waitingFor: outcome.waitingFor });
       } else {
         for (const [key, service] of outcome.ctx.unsafeMap) {
           if (!protectedKeys.has(key)) acc.set(key, service);
@@ -395,9 +406,17 @@ const resolveWire = async (
       }
     }
     if (!progressed) {
-      throw new Error("demesne: Layer.wire found a dependency cycle among the given layers.");
+      // Every remaining layer is stuck waiting on a service that never becomes available —
+      // a genuine dependency cycle (the type system can't catch cycles). Name the services
+      // involved so it's diagnosable rather than a bare "cycle".
+      const services = [...new Set(pending.map((p) => p.waitingFor))].sort();
+      throw new Error(
+        `demesne: Layer.wire could not resolve ${pending.length} layer(s) — a dependency ` +
+          `cycle among the services [${services.join(", ")}] (each is waited on but never ` +
+          `becomes available).`,
+      );
     }
-    remaining = pending;
+    remaining = pending.map((p) => p.layer);
   }
 
   return Ok(makeContext(acc));
