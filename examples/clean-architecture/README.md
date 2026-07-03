@@ -14,19 +14,23 @@ src/
     config.ts
     database.ts
     order-repository.ts
-  app.ts                       # the assembled graph: wire (+ onStart migration)
+  bootstrap.ts                 # assemble the app around a repository provider (shared)
+  app.ts                       # the assembled graph: bootstrap(realRepo) (+ onStart migration)
   main.ts                      # the composition root: build, run, fan out to plugins
-  app.test.ts                  # end-to-end: build, override, forkScope, onStop
+  app.test.ts                  # end-to-end: bootstrap(fake), override, forkScope, onStop
 ```
 
 Beyond the core wiring, it exercises the full combinator surface:
 
-- **`Layer.wire`** assembles the graph in `app.ts`; **`Layer.onStart`** attaches a startup
-  migration to the assembled graph.
+- **`bootstrap`** (`bootstrap.ts`) assembles the app around an `OrderRepository` provider;
+  `app.ts` calls `bootstrap(realRepo)` and the tests call `bootstrap(fakeRepo)`, so both
+  build the **same app** — only the repository differs. **`Layer.onStart`** attaches a
+  startup migration to the assembled graph.
 - **`Layer.member` / `Layer.collect`** accumulate a plugin collection (`AuditSinks`) that
   `main.ts` fans an event out to.
-- **`Layer.override`** (in `app.test.ts`) swaps the repository for a fake — deeply, so the
-  use case that captured it sees the fake — the classic testing seam.
+- **`Layer.override`** (in `app.test.ts`) is the alternative to re-bootstrapping: it patches
+  the repository on the already-assembled `AppLayer` — deeply, so the use case that captured
+  it sees the fake.
 - **`Layer.forkScope`** layers a per-request scope on the built app, and **`Layer.onStop`**
   runs a teardown under `Layer.scoped`.
 

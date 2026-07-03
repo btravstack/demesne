@@ -1,6 +1,6 @@
-// End-to-end tests for the assembled example: they build the real graph and exercise the
-// combinators the app relies on — the multi-binding collection, a deep test `override`, a
-// per-request `forkScope`, and an `onStop` teardown under `scoped`.
+// End-to-end tests for the assembled example. Repository doubles go in two ways — through
+// the shared `bootstrap` with a fake, and by `Layer.override` on the assembled graph — and
+// the app is also exercised via `forkScope` (a per-request scope) and `onStop` (teardown).
 
 import { describe, expect, it } from "vitest";
 
@@ -11,7 +11,12 @@ import { AppLayer, AppStarted } from "./app.js";
 import { GetOrder } from "./application/get-order.js";
 import { OrderRepository } from "./application/ports.js";
 import { AuditSinks } from "./application/plugins.js";
+import { bootstrap } from "./bootstrap.js";
 import { type Order, OrderNotFound } from "./domain/order.js";
+
+// A fake repository — same port, returns a fixed order, no database.
+const fakeOrder = { id: "order-1", total: 999 } satisfies Order;
+const FakeRepository = Layer.value(OrderRepository, { findById: () => Ok(fakeOrder).toAsync() });
 
 describe("clean-architecture example", () => {
   it("collects every plugin from the built graph", async () => {
@@ -28,18 +33,19 @@ describe("clean-architecture example", () => {
     expect((await ctx.get(GetOrder).execute("order-1")).unwrapErr()).toBeInstanceOf(OrderNotFound);
   });
 
-  it("override swaps the repository with a fake — deep, through the use case", async () => {
-    const fake = { id: "order-1", total: 999 } satisfies Order;
-    const FakeRepo = Layer.value(OrderRepository, { findById: () => Ok(fake).toAsync() });
+  it("bootstraps the same app with a fake repository (no database)", async () => {
+    // Go through the SAME bootstrap as main.ts, swapping only the repository.
+    const ctx = (await Layer.build(bootstrap(FakeRepository))).unwrap();
 
-    // AppLayer is a `Layer.wire` result, so it can be re-assembled with the patch.
-    const TestApp = Layer.override(AppLayer, [FakeRepo]);
-    const ctx = (await Layer.build(TestApp)).unwrap();
+    expect((await ctx.get(GetOrder).execute("order-1")).unwrap()).toEqual(fakeOrder);
+  });
 
-    // GetOrderInteractor captured OrderRepository in its constructor — the override is deep,
-    // so it captured the FAKE, not the real repo.
-    const res = await ctx.get(GetOrder).execute("order-1");
-    expect(res.unwrap()).toEqual(fake);
+  it("override swaps the repository in the assembled app — deep, through the use case", async () => {
+    // The alternative to re-bootstrapping: patch the already-assembled AppLayer. Deep — the
+    // GetOrder interactor captured OrderRepository in its constructor, yet sees the fake.
+    const ctx = (await Layer.build(Layer.override(AppLayer, [FakeRepository]))).unwrap();
+
+    expect((await ctx.get(GetOrder).execute("order-1")).unwrap()).toEqual(fakeOrder);
   });
 
   it("forkScope layers a per-request scope on the built app", async () => {
