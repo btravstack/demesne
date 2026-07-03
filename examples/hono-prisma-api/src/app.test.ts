@@ -1,15 +1,19 @@
-// End-to-end HTTP tests with NO database. They go through the SAME `bootstrap` as the server
-// (src/app.ts) — the identical wiring, use cases and routes — swapping only the repository
-// for an in-memory fake. Because the application depends on the `TodoRepository` *port*, the
-// fake drops in without Prisma or Postgres, and `app.request(...)` drives the real Hono app.
+// End-to-end tests with NO database. They go through the SAME `bootstrap` as the server
+// (src/app.ts) — the identical wiring, use cases, plugins and routes — swapping only the
+// repository for an in-memory fake. Because the application depends on the `TodoRepository`
+// *port*, the fake drops in without Prisma or Postgres. The first block drives the real Hono
+// app over HTTP; the second exercises the wired combinators (collect / override / forkScope /
+// onStop) on that same app.
 
 import { describe, expect, it } from "vitest";
 
-import { Layer, type ServiceOf } from "demesne";
+import { type Context, Layer, type ServiceOf, Tag } from "demesne";
 import type { Hono } from "hono";
-import { Err, Ok } from "unthrown";
+import { Err, Ok, type Result } from "unthrown";
 
-import { TodoRepository } from "./application/ports.js";
+import { GetTodo } from "./application/get-todo.js";
+import { AuditSinks } from "./application/plugins.js";
+import { Logger, TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
 import { buildRoutes } from "./http/routes.js";
@@ -43,12 +47,11 @@ const makeFakeRepo = (): ServiceOf<TodoRepository> => {
   };
 };
 
-// Build the SAME app the server builds, but with the fake repository in place of Prisma.
+// The same app the server builds, with the fake repository — a fresh WiredLayer each call.
 // The fake needs nothing, so this graph has no `Scope` and builds without a database.
-const buildTestApp = async () => {
-  const ctx = (await Layer.build(bootstrap(Layer.value(TodoRepository, makeFakeRepo())))).unwrap();
-  return buildRoutes(ctx);
-};
+const fakeApp = () => bootstrap(Layer.value(TodoRepository, makeFakeRepo()));
+
+const buildTestApp = async () => buildRoutes((await Layer.build(fakeApp())).unwrap());
 
 // Reduce a response to the single entity we assert on: its status and parsed body.
 const call = async (app: Hono, path: string, init?: RequestInit) => {
@@ -62,7 +65,7 @@ const postJson = (title: unknown): RequestInit => ({
   body: JSON.stringify({ title }),
 });
 
-describe("todos api", () => {
+describe("todos api (HTTP)", () => {
   it("GET /todos returns the collection", async () => {
     const app = await buildTestApp();
 
@@ -93,7 +96,7 @@ describe("todos api", () => {
     );
   });
 
-  it("POST /todos creates a todo", async () => {
+  it("POST /todos creates a todo (and fans the event out to the audit sinks)", async () => {
     const app = await buildTestApp();
 
     expect(await call(app, "/todos", postJson("walk the dog"))).toEqual(
@@ -125,5 +128,57 @@ describe("todos api", () => {
         body: expect.objectContaining({ error: "invalid body" }),
       }),
     );
+  });
+});
+
+describe("wired combinators on the same app", () => {
+  it("collects both audit sinks (member + collect)", async () => {
+    const ctx = (await Layer.build(fakeApp())).unwrap();
+
+    expect(ctx.get(AuditSinks).map((sink) => sink.name)).toEqual(["console", "in-memory"]);
+  });
+
+  it("override swaps the logger deeply — the use case logs to it", async () => {
+    const logs: string[] = [];
+    const SpyLogger = Layer.value(Logger, { info: (msg) => void logs.push(msg) });
+
+    // fakeApp() is a `Layer.wire` result, so override can re-assemble it with the spy. The
+    // GetTodo interactor captured Logger in its constructor, so it logs to the spy (deep).
+    const ctx = (await Layer.build(Layer.override(fakeApp(), [SpyLogger]))).unwrap();
+    await ctx.get(GetTodo).execute("seed-1");
+
+    expect(logs).toEqual(["getting todo seed-1"]);
+  });
+
+  it("forkScope layers a per-request scope on the built app", async () => {
+    const app = (await Layer.build(fakeApp())).unwrap();
+
+    class RequestId extends Tag("RequestId")<RequestId, { readonly id: string }>() {}
+    const RequestLayer = Layer.factory(RequestId, () => ({ id: "req-7" }));
+
+    const out = await Layer.forkScope(
+      app,
+      RequestLayer,
+      // the fork sees the parent's services (GetTodo) PLUS the request-scoped RequestId
+      (ctx): Result<string, never> =>
+        Ok(`${ctx.get(RequestId).id}:${typeof ctx.get(GetTodo).execute}`),
+    );
+
+    expect(out.unwrap()).toBe("req-7:function");
+  });
+
+  it("onStop runs a teardown when the scope closes", async () => {
+    const events: string[] = [];
+    const Managed = Layer.onStop(fakeApp(), () => {
+      events.push("closed");
+    });
+
+    const out = await Layer.scoped(
+      Managed,
+      (ctx: Context<AuditSinks>): Result<number, never> => Ok(ctx.get(AuditSinks).length),
+    );
+
+    expect(out.unwrap()).toBe(2);
+    expect(events).toEqual(["closed"]);
   });
 });

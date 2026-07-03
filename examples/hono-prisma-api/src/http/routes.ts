@@ -11,10 +11,13 @@ import { z } from "zod";
 import { CreateTodo } from "../application/create-todo.js";
 import { GetTodo } from "../application/get-todo.js";
 import { ListTodos } from "../application/list-todos.js";
+import { AuditSinks } from "../application/plugins.js";
 
 const CreateTodoBody = z.object({ title: z.string().min(1).max(200) });
 
-export const buildRoutes = (ctx: DemesneContext<ListTodos | GetTodo | CreateTodo>): Hono => {
+export const buildRoutes = (
+  ctx: DemesneContext<ListTodos | GetTodo | CreateTodo | AuditSinks>,
+): Hono => {
   const app = new Hono();
 
   app.get("/todos", async (c) =>
@@ -45,7 +48,11 @@ export const buildRoutes = (ctx: DemesneContext<ListTodos | GetTodo | CreateTodo
       );
     }
     return (await ctx.get(CreateTodo).execute(body.data)).match<Response>({
-      ok: (todo) => c.json(todo, 201),
+      ok: (todo) => {
+        // fan the event out to every audit sink (the multi-binding collection)
+        for (const sink of ctx.get(AuditSinks)) sink.record({ action: "create", detail: todo.id });
+        return c.json(todo, 201);
+      },
       err: (error) => c.json({ error: error._tag }, 500),
       defect: () => c.json({ error: "internal error" }, 500),
     });

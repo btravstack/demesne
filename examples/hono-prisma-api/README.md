@@ -1,21 +1,26 @@
 # @demesne-examples/hono-prisma-api
 
-A small **REST API** that shows how `demesne`, `unthrown`, **Hono**, **zod** and **Prisma**
-(Postgres) fit together — a `todos` resource with list / get / create.
+The canonical demesne example: a **clean-architecture REST API** — a `todos` resource (list /
+get / create) — that shows how `demesne`, `unthrown`, **Hono**, **zod** and **Prisma**
+(Postgres) fit together, and exercises the full combinator surface (`wire` / `provideTo` /
+`member` / `collect` / `override` / `forkScope` / `onStart` / `onStop` / `acquireRelease` /
+`scoped`).
 
 ```
 src/
   domain/todo.ts               # entity + tagged errors (no demesne, no Prisma, no HTTP)
   application/ports.ts         # Logger + TodoRepository ports (tags; domain types only)
+  application/plugins.ts       # AuditSinks plugin collection: member + collect
   application/*-todo(s).ts     # use cases — constructor-injected, one `execute` method
   config/env.ts                # zod schema → AppConfig (Layer.make → ConfigError)
   infra/prisma.ts              # PrismaClient as a resource (acquireRelease → Scope)
   infra/todo-repository.ts     # TodoRepository backed by Prisma, rows → domain Todo
   infra/logger.ts              # console Logger
   http/routes.ts               # Hono routes: Result → HTTP (.match → 200/201/404/400/500)
-  app.ts                       # Layer.wire(...) — the assembled graph (carries Scope)
+  bootstrap.ts                 # assemble the app around a repository provider (shared)
+  app.ts                       # bootstrap(prismaRepo) (+ onStart startup check) — carries Scope
   server.ts                    # Layer.scoped(...) — serve for the scope's lifetime
-  app.test.ts                  # end-to-end HTTP tests with an in-memory fake repo (no DB)
+  app.test.ts                  # HTTP + combinator tests via bootstrap(fake) — no database
 prisma/schema.prisma           # the Todo model
 prisma.config.ts               # Prisma 7 config (migrate connection URL)
 ```
@@ -32,12 +37,18 @@ prisma.config.ts               # Prisma 7 config (migrate connection URL)
   (`@prisma/adapter-pg`) takes the URL from the zod-validated config, not the schema.
 - **Ports keep Prisma out of the core.** The `TodoRepository` port speaks only domain types;
   the Prisma-backed adapter maps rows to `Todo` and turns a missing row into `TodoNotFound`.
-  That's why `app.test.ts` can wire an **in-memory fake** in its place and test the whole HTTP
-  stack **without a database**.
+- **One bootstrap for the app and the tests.** `bootstrap.ts` assembles the app around a
+  repository provider; `app.ts` calls `bootstrap(prismaRepo)`, the tests call
+  `bootstrap(fake)`, so both build the **same app** — only the storage differs, and the tests
+  need no database. A startup check (`Layer.onStart`) runs a real query before serving.
 - **unthrown → Hono (the edge).** `http/routes.ts` resolves use cases from the demesne
   `Context` and maps each `Result` with `.match<Response>`: `ok` → 200/201, a domain
   `TodoNotFound` → 404, any other modeled error → 500, a `defect` (unmodeled throw) → 500.
   zod validates the request body (400 on failure).
+- **Plugins & scopes.** A plugin collection (`Layer.member` / `Layer.collect`) accumulates
+  audit sinks that the create route fans an event out to. The tests also show `Layer.override`
+  (swap a service deep in the assembled app), `Layer.forkScope` (a per-request child scope on
+  the built app) and `Layer.onStop` (teardown on scope close).
 
 ## Prisma 7 notes
 

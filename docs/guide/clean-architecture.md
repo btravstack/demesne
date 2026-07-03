@@ -6,10 +6,11 @@ single **composition root** binds them together. Here is one small use case — 
 order — organised by layer.
 
 ::: tip This is a real program
-The full example lives in
-[`examples/clean-architecture`](https://github.com/btravstack/demesne/tree/main/examples/clean-architecture),
-one file per layer, compiled by `tsc` against demesne's built types in CI. The snippets
-below can't drift from working code.
+The same layering — with a Hono REST API, zod config and Prisma/Postgres on top — is a full
+runnable program in
+[`examples/hono-prisma-api`](https://github.com/btravstack/demesne/tree/main/examples/hono-prisma-api),
+compiled by `tsc` against demesne's built types and tested in CI. The snippets below (an
+`Order` use case) teach the pattern; the example applies it to a `Todo` API.
 :::
 
 ## Domain

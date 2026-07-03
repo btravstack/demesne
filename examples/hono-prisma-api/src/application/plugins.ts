@@ -1,6 +1,6 @@
-// Application — a plugin collection (multi-binding). Many audit sinks are accumulated
-// into one `readonly AuditSink[]` service with `Layer.member` + `Layer.collect`, so the
-// composition root fans an event out to every one without knowing them individually.
+// Application — a plugin collection (multi-binding). Several audit sinks are accumulated into
+// one `readonly AuditSink[]` service with `Layer.member` + `Layer.collect`, so the HTTP edge
+// can fan a "todo created" event out to every one without knowing them individually.
 
 import { type Context, Layer, Tag } from "demesne";
 
@@ -13,11 +13,11 @@ type AuditSink = { readonly name: string; readonly record: (event: AuditEvent) =
 
 export class AuditSinks extends Tag("AuditSinks")<AuditSinks, readonly AuditSink[]>() {}
 
-// One contribution, built from the port it needs (the Logger). `member` mirrors
-// `factory`: synchronous and infallible, providing the collection tag with one item.
+// One contribution, built from the port it needs (the Logger). `member` mirrors `factory`:
+// synchronous and infallible, providing the collection tag with a single item.
 const ConsoleAuditLive = Layer.member(AuditSinks, (ctx: Context<Logger>) => ({
   name: "console",
-  record: (event) => ctx.get(Logger).log(`audit ${event.action}: ${event.detail}`),
+  record: (event) => ctx.get(Logger).info(`audit ${event.action}: ${event.detail}`),
 }));
 
 // Another contribution, self-contained.
@@ -26,6 +26,6 @@ const InMemoryAuditLive = Layer.member(AuditSinks, () => {
   return { name: "in-memory", record: (event) => void events.push(event) };
 });
 
-// collect concatenates every member into the AuditSinks array (in listed order),
-// unioning their requirements — so this layer needs the Logger the console sink reads.
+// collect concatenates every member into the AuditSinks array (in listed order), unioning
+// their requirements — so this layer needs the Logger the console sink reads.
 export const AuditSinksLive = Layer.collect(AuditSinks, [ConsoleAuditLive, InMemoryAuditLive]);

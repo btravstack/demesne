@@ -1,7 +1,0 @@
-{
-  "extends": "@demesne/tsconfig/base.json",
-  "compilerOptions": {
-    "rootDir": "./src"
-  },
-  "include": ["src/**/*"]
-}

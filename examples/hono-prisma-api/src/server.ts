@@ -7,11 +7,11 @@ import { serve } from "@hono/node-server";
 import { Layer } from "demesne";
 import { fromSafePromise, Ok, type Result } from "unthrown";
 
-import { AppLayer } from "./app.js";
+import { AppStarted } from "./app.js";
 import { AppConfig } from "./config/env.js";
 import { buildRoutes } from "./http/routes.js";
 
-const outcome = await Layer.scoped(AppLayer, (ctx) => {
+const outcome = await Layer.scoped(AppStarted, (ctx) => {
   const port = ctx.get(AppConfig).PORT;
   const app = buildRoutes(ctx);
 
@@ -38,7 +38,9 @@ outcome.match({
     console.error(
       error._tag === "ConfigError"
         ? `config invalid: ${error.issues}`
-        : `database unreachable: ${String(error.cause)}`,
+        : error._tag === "MigrationError"
+          ? `startup check failed: ${String(error.cause)}`
+          : `database unreachable: ${String(error.cause)}`,
     ),
   defect: (cause) => console.error(`panic: ${String(cause)}`),
 });

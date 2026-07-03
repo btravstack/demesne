@@ -63,7 +63,7 @@ Next: [Core Concepts](./core-concepts) for `Tag` / `Context` / `Layer`, then
 [Layers & Wiring](./layers-and-wiring) to compose a real graph.
 
 ::: info Runnable example
-A complete, type-checked program — laid out by clean-architecture layer and compiled in
-CI — lives in
-[`examples/clean-architecture`](https://github.com/btravstack/demesne/tree/main/examples/clean-architecture).
+A complete, type-checked program — a clean-architecture Hono REST API with zod, Prisma and the
+full combinator surface, compiled and tested in CI — lives in
+[`examples/hono-prisma-api`](https://github.com/btravstack/demesne/tree/main/examples/hono-prisma-api).
 :::
