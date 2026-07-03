@@ -378,8 +378,9 @@ The wiring core is complete: requirements and errors as static unions, variadic 
 automatic assembly (`Layer.wire`), namespaced API, memoization, scoped resources,
 **type-level scope enforcement** (the compiler rejects a resource graph passed to
 `build`), **request / child scopes** (`Layer.forkScope`), a **deep test override**
-(`Layer.override`), and **multi-bindings** (`Layer.member` / `Layer.collect`). Further
-ideas live in [`CLAUDE.md`](./CLAUDE.md).
+(`Layer.override`), **multi-bindings** (`Layer.member` / `Layer.collect`), and **lifecycle
+hooks** (`Layer.onStart` / `Layer.onStop`). Further ideas live in
+[`CLAUDE.md`](./CLAUDE.md).
 
 ## License
 

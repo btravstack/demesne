@@ -766,3 +766,112 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     expect(out.unwrapErr()).toBeInstanceOf(MbBoom);
   });
 });
+
+describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
+  class Config extends Tag("LcConfig")<Config, { readonly url: string }>() {}
+  class Db extends Tag("LcDb")<Db, { readonly url: string }>() {}
+
+  it("runs start hooks after construction, in dependency order, before use", async () => {
+    const log: string[] = [];
+    const ConfigLive = Layer.onStart(
+      Layer.factory(Config, () => ({ url: "cfg" })),
+      (): Result<void, never> => {
+        log.push("start:config");
+        return Ok(undefined);
+      },
+    );
+    // Db depends on Config; its migrate hook must run AFTER config's start hook.
+    const DbLive = Layer.onStart(
+      Layer.factory(Db, (c: Context<Config>) => ({ url: `db(${c.get(Config).url})` })),
+      (c: Context<Db>): Result<void, never> => {
+        log.push(`start:migrate ${c.get(Db).url}`);
+        return Ok(undefined);
+      },
+    );
+
+    const out = await Layer.scoped(Layer.wire(ConfigLive, DbLive), (ctx): Result<string, never> => {
+      log.push("use");
+      return Ok(ctx.get(Db).url);
+    });
+
+    expect(out.unwrap()).toBe("db(cfg)");
+    expect(log).toEqual(["start:config", "start:migrate db(cfg)", "use"]);
+  });
+
+  it("runs start hooks under plain build too (scope-free graph)", async () => {
+    const log: string[] = [];
+    const ConfigLive = Layer.onStart(
+      Layer.factory(Config, () => ({ url: "cfg" })),
+      (): Result<void, never> => {
+        log.push("warmup");
+        return Ok(undefined);
+      },
+    );
+
+    const ctx = (await Layer.build(ConfigLive)).unwrap();
+    expect(ctx.get(Config).url).toBe("cfg");
+    expect(log).toEqual(["warmup"]);
+  });
+
+  it("aborts startup on a failing hook before use, and unions its error into E", async () => {
+    class MigrationError extends TaggedError("MigrationError")<{ why: string }> {}
+    let used = false;
+    const DbLive = Layer.onStart(
+      Layer.factory(Db, () => ({ url: "db" })),
+      (): Result<void, MigrationError> => Err(new MigrationError({ why: "schema drift" })),
+    );
+
+    const out = await Layer.build(Layer.wire(DbLive));
+    // used stays false because `build` has no `use`; assert the error surfaced:
+    expect(out.isErr()).toBe(true);
+    expect(out.unwrapErr()).toBeInstanceOf(MigrationError);
+    expect(used).toBe(false);
+  });
+
+  it("closes the scope even when a start hook fails (teardown still runs)", async () => {
+    const log: string[] = [];
+    class Boom extends TaggedError("LcBoom")<{ why: string }> {}
+    const DbLive = Layer.onStop(
+      Layer.onStart(
+        Layer.factory(Db, () => ({ url: "db" })),
+        (): Result<void, Boom> => {
+          log.push("start:fail");
+          return Err(new Boom({ why: "no" }));
+        },
+      ),
+      () => {
+        log.push("stop:db");
+      },
+    );
+
+    const out = await Layer.scoped(Layer.wire(DbLive), (): Result<string, never> => {
+      log.push("use");
+      return Ok("x");
+    });
+
+    expect(out.isErr()).toBe(true);
+    expect(log).toEqual(["start:fail", "stop:db"]); // use skipped, teardown ran
+  });
+
+  it("onStop registers a teardown run in reverse order (LIFO) on scope close", async () => {
+    const log: string[] = [];
+    const A = Layer.onStop(Layer.value(Config, { url: "a" }), () => {
+      log.push("stop:config");
+    });
+    const B = Layer.onStop(
+      Layer.factory(Db, (c: Context<Config>) => ({ url: c.get(Config).url })),
+      () => {
+        log.push("stop:db");
+      },
+    );
+
+    const out = await Layer.scoped(Layer.wire(A, B), (ctx): Result<string, never> => {
+      log.push("use");
+      return Ok(ctx.get(Db).url);
+    });
+
+    expect(out.unwrap()).toBe("a");
+    // Config acquired before Db → teardown is LIFO: db first, then config.
+    expect(log).toEqual(["use", "stop:db", "stop:config"]);
+  });
+});

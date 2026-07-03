@@ -230,3 +230,25 @@ type _emptyCollected = Expect<Equal<typeof emptyCollected, Layer<Plugins, never,
 // Every member must contribute to the SAME collection tag — a foreign tag is rejected.
 // @ts-expect-error - ServiceA is not the Plugins collection tag.
 Layer.collect(Plugins, [Layer.value(ServiceA, { a: "x" })]);
+
+// --- 10. Layer.onStart + Layer.onStop: lifecycle hooks -----------------------
+
+// onStart unions the hook's error into E; provides and needs (contravariant!) are kept.
+declare const startBase: Layer<ServiceA, EA, ServiceB>;
+const started = Layer.onStart(startBase, (): Result<void, EC> => Ok(undefined));
+type _started = Expect<Equal<typeof started, Layer<ServiceA, EA | EC, ServiceB>>>;
+
+// The start hook sees exactly the layer's provided Context<P> — no more, no less.
+Layer.onStart(startBase, (ctx): Result<void, never> => {
+  type _ctxIsProvided = Expect<Equal<typeof ctx, Context<ServiceA>>>;
+  return Ok(undefined);
+});
+
+// onStop adds Scope to Needs — the graph must be consumed with `scoped`, not `build`.
+declare const stopBase: Layer<ServiceA, EA, never>;
+const stopped = Layer.onStop(stopBase, () => {});
+type _stopped = Expect<Equal<typeof stopped, Layer<ServiceA, EA, Scope>>>;
+// @ts-expect-error - onStop adds Scope; build requires Needs = never.
+Layer.build(stopped);
+const stoppedScoped = Layer.scoped(stopped, (): Result<number, never> => Ok(1));
+type _stoppedScoped = Expect<Equal<typeof stoppedScoped, AsyncResult<number, EA>>>;

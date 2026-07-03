@@ -150,15 +150,23 @@ export interface Scope {
 //   • memoMap : each layer constructs ONCE per build. Combinators look a child
 //     up by reference before building it, so a layer shared across branches is
 //     constructed a single time (and the in-flight AsyncResult is shared).
-//   • finalizers : release thunks registered by `acquireRelease`, run in reverse
-//     acquisition order (LIFO) when the scope closes — see `scoped`.
+//   • finalizers : release thunks registered by `acquireRelease` / `onStop`, run in
+//     reverse acquisition order (LIFO) when the scope closes — see `scoped`.
+//   • startHooks : post-build thunks registered by `onStart`, run in acquisition order
+//     (FIFO — i.e. dependency order, since a dependent builds after its deps) once the
+//     whole graph is constructed, before `use` — see `runStartHooks`.
 // ---------------------------------------------------------------------------
 interface BuildState {
   readonly memoMap: Map<Layer<any, any, any>, AsyncResult<Context<any>, any>>;
   readonly finalizers: (() => Promise<void>)[];
+  readonly startHooks: (() => AsyncResult<void, any>)[];
 }
 
-const makeBuildState = (): BuildState => ({ memoMap: new Map(), finalizers: [] });
+const makeBuildState = (): BuildState => ({
+  memoMap: new Map(),
+  finalizers: [],
+  startHooks: [],
+});
 
 // Build a layer at most once per scope, keyed by layer reference. Storing the
 // in-flight AsyncResult (not the resolved Context) means concurrent branches that
@@ -186,6 +194,16 @@ const closeScope = async (state: BuildState): Promise<void> => {
     }
   }
 };
+
+// Run the graph's start hooks in registration order (FIFO = dependency order), SEQUENTIALLY
+// — a migration/warmup runs only after the ones it may depend on. Unlike teardown, a start
+// hook is fallible: the FIRST Err short-circuits (its error is already unioned into the
+// graph's `E` by `onStart`), so a failed migration aborts startup before `use`.
+const runStartHooks = (state: BuildState): AsyncResult<void, any> =>
+  state.startHooks.reduce<AsyncResult<void, any>>(
+    (acc, hook) => acc.flatMap(() => hook()),
+    Ok<void>(undefined).toAsync(),
+  );
 
 // A layer from an already-constructed value. Needs nothing, cannot fail.
 const value = <Self, Service>(
@@ -237,6 +255,45 @@ const acquireRelease = <Self, Service, E, Needs = never>(
         });
         return unsafeAdd(emptyAny(), tag.key, service);
       }),
+});
+
+// Attach a START hook to a layer: a post-construction step (a migration, a warmup, a
+// health gate) run AFTER the whole graph is built, before `use`, in dependency order. The
+// hook sees the layer's provided `Context<P>` and returns a `Result`/`AsyncResult` — a
+// fallible step, whose error unions into the layer's `E` (a failed hook aborts startup). It
+// runs at the terminal (`build` / `scoped` / `forkScope`), not when the layer constructs.
+const onStart = <L extends Layer<any, any, any>, E2>(
+  layer: L,
+  hook: (ctx: Context<ProvidesOf<L>>) => Result<void, E2> | AsyncResult<void, E2>,
+): Layer<ProvidesOf<L>, ErrorOf<L> | E2, NeedsOf<L>> => ({
+  build: (ctx, state) =>
+    buildMemo(layer, ctx as Context<any>, state).map((provided) => {
+      state.startHooks.push(() =>
+        Ok<void>(undefined)
+          .toAsync()
+          .flatMap(() => hook(provided as Context<any>)),
+      );
+      return provided;
+    }),
+});
+
+// Attach a STOP hook to a layer: a teardown for an already-provided service (a graceful
+// shutdown, a flush) that isn't itself a resource. It registers a finalizer with the scope
+// — run in reverse order (LIFO) when the scope closes — so, like `acquireRelease`, it adds
+// `Scope` to `Needs`: the graph must be consumed with `scoped`. The hook is infallible,
+// mirroring `release`. (`onStop` is the counterpart to `acquireRelease`'s release for a
+// service the layer did not itself acquire.)
+const onStop = <L extends Layer<any, any, any>>(
+  layer: L,
+  hook: (ctx: Context<ProvidesOf<L>>) => void | Promise<void>,
+): Layer<ProvidesOf<L>, ErrorOf<L>, NeedsOf<L> | Scope> => ({
+  build: (ctx, state) =>
+    buildMemo(layer, ctx as Context<any>, state).map((provided) => {
+      state.finalizers.push(async () => {
+        await hook(provided as Context<any>);
+      });
+      return provided;
+    }),
 });
 
 // A single contribution to a COLLECTION tag — a tag whose service is a `readonly Item[]`.
@@ -456,8 +513,12 @@ const collect = <Self, Item, Ms extends readonly Layer<Self, any, any>[]>(
 // Build a fully-wired layer. Callable once `Needs` is `never` — a graph that still
 // needs a `Scope` (contains `acquireRelease` layers) is a COMPILE error here; use
 // `scoped`. The AsyncResult still carries `E`. Shared layers construct once.
-const build = <P, E>(self: Layer<P, E, never>): AsyncResult<Context<P>, E> =>
-  buildMemo(self, empty(), makeBuildState());
+const build = <P, E>(self: Layer<P, E, never>): AsyncResult<Context<P>, E> => {
+  const state = makeBuildState();
+  return buildMemo(self, empty(), state).flatMap((ctx) =>
+    runStartHooks(state).map(() => ctx),
+  );
+};
 
 // Build a scoped layer, run `use` with the resulting Context, then CLOSE the scope
 // — releasing every acquired resource in reverse order, whether `use` succeeded,
@@ -473,7 +534,11 @@ const scoped = <P, E, A, E2>(
     (async (): Promise<Result<A, E | E2>> => {
       // `emptyAny()` (not `empty()`) because `self` needs `Context<Scope>`; the
       // phantom Scope never has a runtime value, so an empty context satisfies it.
-      const result = await buildMemo(self, emptyAny(), state).flatMap((ctx) => use(ctx));
+      // Start hooks run after the whole graph builds, before `use`; a failed hook
+      // skips `use` but the scope still closes (releasing whatever was acquired).
+      const result = await buildMemo(self, emptyAny(), state)
+        .flatMap((ctx) => runStartHooks(state).map(() => ctx))
+        .flatMap((ctx) => use(ctx));
       await closeScope(state);
       return result;
     })(),
@@ -494,9 +559,13 @@ const forkScope = <Parent, ReqP, E, A, E2>(
   const state = makeBuildState();
   return fromSafePromise(
     (async (): Promise<Result<A, E | E2>> => {
-      const result = await buildMemo(requestLayer, parent as Context<any>, state).flatMap(
-        (reqCtx) => use(mergeContext(parent as Context<any>, reqCtx) as Context<Parent | ReqP>),
-      );
+      // The fork runs only ITS OWN start hooks (fresh state) — the parent started when
+      // it was built — then closes only the fork's scope.
+      const result = await buildMemo(requestLayer, parent as Context<any>, state)
+        .flatMap((reqCtx) => runStartHooks(state).map(() => reqCtx))
+        .flatMap((reqCtx) =>
+          use(mergeContext(parent as Context<any>, reqCtx) as Context<Parent | ReqP>),
+        );
       await closeScope(state);
       return result;
     })(),
@@ -515,8 +584,8 @@ const forkScope = <Parent, ReqP, E, A, E2>(
 export const Context = { empty };
 
 // Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member`),
-// combinators (`merge` / `provideTo` / `wire` / `override` / `collect`), and the terminals
-// `build` / `scoped` / `forkScope`.
+// combinators (`merge` / `provideTo` / `wire` / `override` / `collect` / `onStart` /
+// `onStop`), and the terminals `build` / `scoped` / `forkScope`.
 export const Layer = {
   value,
   factory,
@@ -528,6 +597,8 @@ export const Layer = {
   wire,
   override,
   collect,
+  onStart,
+  onStop,
   build,
   scoped,
   forkScope,

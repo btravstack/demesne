@@ -128,7 +128,8 @@ short-circuit, throw → Defect, and an N-way merge.)_
 
 The public value surface is grouped into companion objects so a reader can tell a
 Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,merge,
-provideTo,wire,override,collect,build,scoped,forkScope}` and `Context.{empty}`. `Context` and `Layer` are each **both a
+provideTo,wire,override,collect,onStart,onStop,build,scoped,forkScope}` and
+`Context.{empty}`. `Context` and `Layer` are each **both a
 type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
 `Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
 not re-flatten these into top-level function exports.
@@ -222,22 +223,45 @@ member + `make` flattening, empty collection, first-`Err` short-circuit. And the
 tests: member Needs inferred, collect unions error/needs, empty collection type, foreign tag
 rejected.)_
 
+### 15. Lifecycle hooks: `onStart` runs post-build (FIFO), `onStop` tears down (LIFO)
+
+`onStart(layer, hook)` and `onStop(layer, hook)` attach lifecycle steps **distinct from
+construction**, threaded through the same `BuildState`. `onStart` pushes to `startHooks`; the
+terminals (`build` / `scoped` / `forkScope`) run them via `runStartHooks` **after the whole
+graph is built, before `use`, sequentially, in registration order (FIFO = dependency order,
+since a dependent builds after its deps)**. A start hook is **fallible** — it returns a
+`Result` / `AsyncResult` whose error **unions into the layer's `E`**, and the first `Err`
+short-circuits startup before `use` (the scope still closes). `onStop` pushes a **finalizer**
+(same list as `acquireRelease`, run **LIFO** on scope close) and therefore adds **`Scope`** to
+`Needs` — the graph must be consumed with `scoped`; its hook is **infallible**, mirroring
+`release`. Both are **combinators** (decorate an existing layer), so — like `override` — they
+must **infer the whole layer as `L extends Layer<any,any,any>`** and pull channels with
+`ProvidesOf`/`ErrorOf`/`NeedsOf`; inferring `N` from a `Layer<P,E,N>` parameter directly
+degrades to `any` (contravariant position). Do **not** run start hooks eagerly at
+construction (they must see the fully-built graph), and do **not** make `onStop` fallible or
+scope-free (teardown is best-effort and needs the `Scope` discipline). `onStop` is **not**
+redundant with `acquireRelease`: the latter acquires _and_ releases a resource; `onStop` adds
+shutdown to a service built some other way. _(Guarded by the spec: dependency-order start
+before `use`, start under plain `build`, failed-hook abort with error union, scope-closes-on-
+failed-hook, LIFO stop order. And the type-level tests: `onStart` unions the hook error and
+keeps `Needs`; `onStop` adds `Scope` so `build` rejects it and `scoped` accepts it.)_
+
 ## Roadmap — ideas from the wider DI ecosystem
 
-The wiring core is complete. Four roadmap items are **now implemented**: `Layer.wire`
+The wiring core is complete. Five roadmap items are **now implemented**: `Layer.wire`
 (automatic assembly) provides the union of every service, unions errors, and leaves
 `Needs = Exclude<allNeeds, allProvides>`, resolving order in rounds at runtime (a layer
 reading a not-yet-built dep is deferred; a cycle is a runtime `Defect`) — do **not** try
 to make it topologically sort by types (they're erased) or memoize failed attempts;
 `Layer.forkScope` (request / child scopes, see invariant #12); `Layer.override` (the
-test override combinator, see invariant #13); and `Layer.member` / `Layer.collect`
-(multi-bindings, see invariant #14). Remaining future work, borrowed selectively from
-mature DI systems **without** violating the thesis, prioritized:
+test override combinator, see invariant #13); `Layer.member` / `Layer.collect`
+(multi-bindings, see invariant #14); and `Layer.onStart` / `Layer.onStop` (lifecycle
+hooks, see invariant #15). Remaining future work, borrowed selectively from mature DI
+systems **without** violating the thesis:
 
-1. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
-   Clojure Integrant). An optional `onStart` run after the whole graph is built, ordered
-   topologically — for migrations, warmups, health gating.
-2. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
+1. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid. The only
+   remaining roadmap item; a read-only diagnostic derived from the `wire` resolution
+   rounds (types are erased, so a truthful graph comes from runtime, not `Needs`).
 
 Already solved elegantly, document it as the answer: **assisted injection**
 (injected deps + call-time args) is the constructor-injected use-case pattern

@@ -122,6 +122,48 @@ Notes:
 - **Errors union.** A failure while building the request layer (`E`) or in `use` (`E2`)
   surfaces as `AsyncResult<A, E | E2>`; the fork is closed either way.
 
+## Lifecycle hooks
+
+Construction builds a service; some services need a step **after** the whole graph is
+assembled — a migration, a cache warmup, a health gate — and some need a graceful
+**shutdown** distinct from resource release. `Layer.onStart` and `Layer.onStop` attach
+these to any layer.
+
+```ts
+import { Layer, Tag, type Context } from "demesne";
+import { fromPromise, type Result, TaggedError } from "unthrown";
+
+class MigrationError extends TaggedError("MigrationError")<{ cause: unknown }> {}
+
+// run AFTER the whole graph is built, before `use`, in dependency order:
+const DbLive = Layer.onStart(PoolLive, (ctx: Context<Pool>) =>
+  fromPromise(migrate(ctx.get(Pool)), (cause) => new MigrationError({ cause })),
+);
+
+// a graceful shutdown for an already-built service (adds `Scope`, so consume with `scoped`):
+const ServerLive = Layer.onStop(HttpServerLive, (ctx: Context<HttpServer>) =>
+  ctx.get(HttpServer).drain(),
+);
+
+const result = await Layer.scoped(Layer.wire(DbLive, ServerLive, /* … */), use);
+// build everything → run start hooks (dep order) → use → run stop hooks + releases (LIFO)
+```
+
+Notes:
+
+- **`onStart` runs after construction, in dependency order.** Hooks run once the whole
+  graph is built (a dependent's hook after its dependencies'), **sequentially**, before
+  `use`. They run under `Layer.build` too, not only `scoped`.
+- **A failed start hook aborts startup.** `onStart`'s hook returns a `Result` /
+  `AsyncResult`; its error **unions into the layer's `E`**, and the first failure
+  short-circuits before `use` — but the scope still closes (releasing whatever was
+  acquired).
+- **`onStop` is the teardown counterpart.** It registers a finalizer (run **LIFO** with
+  the resource releases) and, like `acquireRelease`, adds **`Scope`** to the requirements —
+  so the compiler makes you consume it with `scoped`. The hook is infallible, like
+  `release`. (A service that both acquires and releases is just `acquireRelease`; `onStop`
+  adds shutdown to a service built some other way.)
+
 ## Future
 
 The wiring core is complete. Further ideas will be tracked in the repository's
