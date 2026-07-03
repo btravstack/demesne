@@ -377,8 +377,9 @@ const summary = await Layer.scoped(provideTo(RepoLive, PoolLive), (ctx) =>
 The wiring core is complete: requirements and errors as static unions, variadic `merge`,
 automatic assembly (`Layer.wire`), namespaced API, memoization, scoped resources,
 **type-level scope enforcement** (the compiler rejects a resource graph passed to
-`build`), **request / child scopes** (`Layer.forkScope`), and a **deep test override**
-(`Layer.override`). Further ideas live in [`CLAUDE.md`](./CLAUDE.md).
+`build`), **request / child scopes** (`Layer.forkScope`), a **deep test override**
+(`Layer.override`), and **multi-bindings** (`Layer.member` / `Layer.collect`). Further
+ideas live in [`CLAUDE.md`](./CLAUDE.md).
 
 ## License
 

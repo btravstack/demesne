@@ -4,9 +4,10 @@
 // allowed). A failing assertion is a compile error.
 //
 // `Expect<Equal<A, B>>` is a hard error when `A` and `B` differ; `@ts-expect-error`
-// guards the cases that must NOT compile. These four blocks prove the guarantees
-// the core was designed for: absent reads fail, un-wired requirements block
-// `build`, the error channel is the real union, and `Context` is contravariant.
+// guards the cases that must NOT compile. The blocks below prove the guarantees the
+// core was designed for: absent reads fail, un-wired requirements block `build`, the
+// error channel is the real union, `Context` is contravariant, scopes are enforced,
+// and the combinators (`wire` / `override` / `collect`) compute every channel exactly.
 
 import { type Context, Layer, type Scope, type ServiceOf, Tag, type WiredLayer } from "./index.js";
 import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
@@ -200,3 +201,32 @@ type _withNew = Expect<Equal<typeof withNew, Layer<ServiceA | ServiceB | Service
 const plainBase: Layer<ServiceA, never, never> = Layer.value(ServiceA, { a: "x" });
 // @ts-expect-error - override requires a wired base, not a plain layer.
 Layer.override(plainBase, [Layer.value(ServiceA, { a: "y" })]);
+
+// --- 9. Layer.member + Layer.collect: multi-bindings / plugin collections -----
+
+type Plugin = { readonly name: string };
+class Plugins extends Tag("Plugins")<Plugins, readonly Plugin[]>() {}
+
+// A member provides the collection tag; its own Needs are inferred from the factory.
+const memberA = Layer.member(Plugins, (ctx: Context<ServiceA>) => ({ name: ctx.get(ServiceA).a }));
+type _memberA = Expect<Equal<typeof memberA, Layer<Plugins, never, ServiceA>>>;
+
+// The collection tag's service is the array shape.
+type _pluginsSvc = Expect<Equal<ServiceOf<Plugins>, readonly Plugin[]>>;
+
+// collect unions member errors and requirements across the whole set.
+const memberB: Layer<Plugins, EB, ServiceB> = Layer.make(
+  Plugins,
+  (ctx: Context<ServiceB>): Result<readonly Plugin[], EB> =>
+    Ok([{ name: String(ctx.get(ServiceB).b) }]),
+);
+const collected = Layer.collect(Plugins, [memberA, memberB]);
+type _collected = Expect<Equal<typeof collected, Layer<Plugins, EB, ServiceA | ServiceB>>>;
+
+// An empty collection needs nothing and cannot fail.
+const emptyCollected = Layer.collect(Plugins, []);
+type _emptyCollected = Expect<Equal<typeof emptyCollected, Layer<Plugins, never, never>>>;
+
+// Every member must contribute to the SAME collection tag — a foreign tag is rejected.
+// @ts-expect-error - ServiceA is not the Plugins collection tag.
+Layer.collect(Plugins, [Layer.value(ServiceA, { a: "x" })]);

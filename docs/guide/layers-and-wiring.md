@@ -145,6 +145,41 @@ you override a resource (`acquireRelease`) tag, the base resource is still acqui
 released; its value is simply discarded.
 :::
 
+### `Layer.member` + `Layer.collect` — multi-bindings
+
+Sometimes a port has **many** implementations that all matter — request middlewares,
+health checks, event subscribers, plugins. **`Layer.collect`** accumulates them into a
+single `readonly Item[]` service, with no runtime registry.
+
+Define a **collection tag** whose service is the array, then contribute members:
+
+```ts
+type Plugin = { readonly name: string; readonly handle: (r: Req) => Res };
+class Plugins extends Tag("Plugins")<Plugins, readonly Plugin[]>() {}
+
+// each `member` is one contribution, built from its own ports:
+const AuthLive = Layer.member(Plugins, (ctx: Context<Config>) => authPlugin(ctx.get(Config)));
+const MetricsLive = Layer.member(Plugins, () => metricsPlugin());
+const TracingLive = Layer.member(Plugins, () => tracingPlugin());
+
+const AllPlugins = Layer.collect(Plugins, [AuthLive, MetricsLive, TracingLive]);
+//    ^? Layer<Plugins, never, Config>   — Plugins resolves to readonly Plugin[]
+
+const app = Layer.wire(ConfigLive, AllPlugins, /* …consumers of Plugins… */);
+ctx.get(Plugins); // [auth, metrics, tracing] — in listed order
+```
+
+collect builds the members in **parallel** (memoized, first `Err` short-circuits),
+concatenates their items **in listed order**, and provides the tag with the full array.
+Errors and requirements **union** across every member; an empty list is an empty collection.
+
+::: tip Fallible / async contributions, and multiple items
+`member` mirrors `factory` — synchronous and infallible. For a contribution that can fail
+or is async, use `Layer.make(Plugins, …)` returning a `Result` / `AsyncResult` of a
+**one-element array**; collect accepts any layer that provides the collection tag, and
+**flattens** each member's array, so a single member may contribute several items.
+:::
+
 ### `Layer.build` — run a fully-wired layer
 
 Callable only once `Needs` is `never`. The `AsyncResult` still carries `E`, since

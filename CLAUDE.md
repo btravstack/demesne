@@ -127,8 +127,8 @@ short-circuit, throw → Defect, and an N-way merge.)_
 ### 9. Operations are namespaced under `Layer` / `Context`
 
 The public value surface is grouped into companion objects so a reader can tell a
-Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,merge,
-provideTo,wire,override,build,scoped,forkScope}` and `Context.{empty}`. `Context` and `Layer` are each **both a
+Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,merge,
+provideTo,wire,override,collect,build,scoped,forkScope}` and `Context.{empty}`. `Context` and `Layer` are each **both a
 type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
 `Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
 not re-flatten these into top-level function exports.
@@ -202,24 +202,42 @@ intermediate propagation, add-a-new-tag, base resource still torn down, patch-er
 short-circuit, wins over an ambient outer value. And the type-level tests: provides/errors/
 needs computed; a new tag joins provides; a non-wired base is rejected.)_
 
+### 14. Multi-bindings: `member` contributes, `collect` concatenates
+
+A **collection tag** is a tag whose service is a `readonly Item[]`. `member(collectionTag, f)`
+is a single contribution — it mirrors `factory` (sync, infallible) and provides the tag with
+a **one-element** array; a fallible / async contribution is a `make` returning a one-element
+array instead (the constructor family stays distinct by qualification — do **not** collapse
+`member` into a value-or-Result overload). `collect(collectionTag, members)` builds every
+member in **parallel** (memoized, first `Err` short-circuits, à la `merge`), reads each
+member's array for the tag's key, **concatenates them in listed order** (flattening, so a
+member may contribute several items), and provides the tag with the full array. Members are
+constrained to `Layer<Self, any, any>` for the same `Self` (a foreign tag is a compile
+error); errors and requirements union across members via `ErrorOf`/`NeedsOf`, and an empty
+list is an empty collection (`Layer<Self, never, never>`). collect must **not** use
+`mergeContext` (same-key provisions would overwrite, not accumulate) — it reads and concats
+each member's array by hand. No runtime registry; the port list stays declared at boundaries.
+_(Guarded by the spec: listed-order concat, per-member needs threaded through `wire`, mixed
+member + `make` flattening, empty collection, first-`Err` short-circuit. And the type-level
+tests: member Needs inferred, collect unions error/needs, empty collection type, foreign tag
+rejected.)_
+
 ## Roadmap — ideas from the wider DI ecosystem
 
-The wiring core is complete. Three roadmap items are **now implemented**: `Layer.wire`
+The wiring core is complete. Four roadmap items are **now implemented**: `Layer.wire`
 (automatic assembly) provides the union of every service, unions errors, and leaves
 `Needs = Exclude<allNeeds, allProvides>`, resolving order in rounds at runtime (a layer
 reading a not-yet-built dep is deferred; a cycle is a runtime `Defect`) — do **not** try
 to make it topologically sort by types (they're erased) or memoize failed attempts;
-`Layer.forkScope` (request / child scopes, see invariant #12); and `Layer.override` (the
-test override combinator, see invariant #13). Remaining future work, borrowed selectively
-from mature DI systems **without** violating the thesis, prioritized:
+`Layer.forkScope` (request / child scopes, see invariant #12); `Layer.override` (the
+test override combinator, see invariant #13); and `Layer.member` / `Layer.collect`
+(multi-bindings, see invariant #14). Remaining future work, borrowed selectively from
+mature DI systems **without** violating the thesis, prioritized:
 
-1. **Multi-bindings / plugin collections** (from Guice `@IntoSet`, Angular `multi`,
-   .NET keyed services). Accumulate N implementations of a port into a `readonly Item[]`
-   service — for plugin architectures, without a runtime registry.
-2. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
+1. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
    Clojure Integrant). An optional `onStart` run after the whole graph is built, ordered
    topologically — for migrations, warmups, health gating.
-3. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
+2. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
 
 Already solved elegantly, document it as the answer: **assisted injection**
 (injected deps + call-time args) is the constructor-injected use-case pattern

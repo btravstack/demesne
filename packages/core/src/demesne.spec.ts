@@ -698,3 +698,71 @@ describe("Layer.override: swap providers in an assembled graph", () => {
     expect(ctx.get(Consumer).v).toBe("override");
   });
 });
+
+describe("Layer.member + Layer.collect: multi-bindings / plugin collections", () => {
+  type Plugin = { readonly name: string; readonly weight: number };
+  class Plugins extends Tag("Plugins")<Plugins, readonly Plugin[]>() {}
+
+  it("collects members into one array, in listed order", async () => {
+    const A = Layer.member(Plugins, () => ({ name: "a", weight: 1 }));
+    const B = Layer.member(Plugins, () => ({ name: "b", weight: 2 }));
+    const C = Layer.member(Plugins, () => ({ name: "c", weight: 3 }));
+
+    const ctx = (await Layer.build(Layer.collect(Plugins, [A, B, C]))).unwrap();
+    const plugins = ctx.get(Plugins);
+
+    expect(plugins.map((p) => p.name)).toEqual(["a", "b", "c"]);
+    expect(plugins).toHaveLength(3);
+  });
+
+  it("threads each member's own requirements, satisfied by the surrounding wire", async () => {
+    class Config extends Tag("MbConfig")<Config, { readonly env: string }>() {}
+    const Auth = Layer.member(Plugins, (c: Context<Config>) => ({
+      name: `auth-${c.get(Config).env}`,
+      weight: 1,
+    }));
+    const Metrics = Layer.member(Plugins, () => ({ name: "metrics", weight: 2 }));
+
+    const App = Layer.wire(
+      Layer.value(Config, { env: "prod" }),
+      Layer.collect(Plugins, [Auth, Metrics]),
+    );
+    const ctx = (await Layer.build(App)).unwrap();
+
+    expect(ctx.get(Plugins).map((p) => p.name)).toEqual(["auth-prod", "metrics"]);
+  });
+
+  it("mixes member with a make-based (fallible/async) contribution, flattening arrays", async () => {
+    const A = Layer.member(Plugins, () => ({ name: "a", weight: 1 }));
+    // a make contribution may add MORE than one item — collect flattens it
+    const Pair = Layer.make(
+      Plugins,
+      (): Result<readonly Plugin[], never> =>
+        Ok([
+          { name: "b", weight: 2 },
+          { name: "c", weight: 3 },
+        ]),
+    );
+
+    const ctx = (await Layer.build(Layer.collect(Plugins, [A, Pair]))).unwrap();
+    expect(ctx.get(Plugins).map((p) => p.name)).toEqual(["a", "b", "c"]);
+  });
+
+  it("yields an empty collection for no members", async () => {
+    const ctx = (await Layer.build(Layer.collect(Plugins, []))).unwrap();
+    expect(ctx.get(Plugins)).toEqual([]);
+  });
+
+  it("short-circuits on the first failing member", async () => {
+    class MbBoom extends TaggedError("MbBoom")<{ why: string }> {}
+    const A = Layer.member(Plugins, () => ({ name: "a", weight: 1 }));
+    const Bad = Layer.make(
+      Plugins,
+      (): Result<readonly Plugin[], MbBoom> => Err(new MbBoom({ why: "nope" })),
+    );
+
+    const out = await Layer.build(Layer.collect(Plugins, [A, Bad]));
+    expect(out.isErr()).toBe(true);
+    expect(out.unwrapErr()).toBeInstanceOf(MbBoom);
+  });
+});

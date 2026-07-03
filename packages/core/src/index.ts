@@ -239,6 +239,19 @@ const acquireRelease = <Self, Service, E, Needs = never>(
       }),
 });
 
+// A single contribution to a COLLECTION tag — a tag whose service is a `readonly Item[]`.
+// Mirrors `factory` (built synchronously and infallibly from the context): it provides the
+// collection tag with a ONE-element array, which `collect` concatenates with the other
+// members. For a fallible / async contribution, use `Layer.make` returning a one-element
+// array instead; the constructor family stays distinct by qualification.
+const member = <Self, Item, Needs = never>(
+  collectionTag: Tag<Self, readonly Item[]>,
+  f: (ctx: Context<Needs>) => Item,
+): Layer<Self, never, Needs> => ({
+  build: (ctx) =>
+    Ok(unsafeAdd(emptyAny(), collectionTag.key, [f(ctx)] as readonly Item[])).toAsync(),
+});
+
 // Distribute over a union of layers to collect each channel as a union. Naked
 // type parameters, so applying them to `Ls[number]` distributes over the tuple.
 type ProvidesOf<L> = L extends Layer<infer P, any, any> ? P : never;
@@ -415,6 +428,31 @@ const override = <
     ).flatMap((result) => result.toAsync()),
 });
 
+// Accumulate several contributions to one COLLECTION tag into a single `readonly Item[]`
+// service — the multi-binding / plugin-collection pattern, with no runtime registry. Each
+// member provides the collection tag with an array (see `member`, or a `make`/`factory`
+// returning one). collect builds them in PARALLEL (memoized, first `Err` short-circuits),
+// concatenates their items IN LISTED ORDER, and provides the tag with the full array.
+// Errors and requirements union across members; an empty member list is an empty collection.
+const collect = <Self, Item, Ms extends readonly Layer<Self, any, any>[]>(
+  collectionTag: Tag<Self, readonly Item[]>,
+  members: Ms,
+): Layer<Self, ErrorOf<Ms[number]>, NeedsOf<Ms[number]>> => ({
+  build: (ctx, state) =>
+    allAsync(
+      (members as readonly Layer<any, any, any>[]).map((m) =>
+        buildMemo(m, ctx as Context<any>, state),
+      ),
+    ).map((contexts) => {
+      const items: Item[] = [];
+      for (const c of contexts as Context<any>[]) {
+        const arr = c.unsafeMap.get(collectionTag.key) as readonly Item[] | undefined;
+        if (arr !== undefined) items.push(...arr);
+      }
+      return unsafeAdd(emptyAny(), collectionTag.key, items as readonly Item[]);
+    }),
+});
+
 // Build a fully-wired layer. Callable once `Needs` is `never` — a graph that still
 // needs a `Scope` (contains `acquireRelease` layers) is a COMPILE error here; use
 // `scoped`. The AsyncResult still carries `E`. Shared layers construct once.
@@ -476,18 +514,20 @@ const forkScope = <Parent, ReqP, E, A, E2>(
 // Context constructors. (Reading a service is the instance method `ctx.get(tag)`.)
 export const Context = { empty };
 
-// Layer constructors (`value` / `factory` / `make` / `acquireRelease`), combinators
-// (`merge` / `provideTo` / `wire` / `override`), and the terminals `build` / `scoped` /
-// `forkScope`.
+// Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member`),
+// combinators (`merge` / `provideTo` / `wire` / `override` / `collect`), and the terminals
+// `build` / `scoped` / `forkScope`.
 export const Layer = {
   value,
   factory,
   make,
   acquireRelease,
+  member,
   merge,
   provideTo,
   wire,
   override,
+  collect,
   build,
   scoped,
   forkScope,
