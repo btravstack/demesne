@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Layer, type ServiceOf } from "demesne";
+import type { Hono } from "hono";
 import { Err, Ok } from "unthrown";
 
 import { TodoRepository } from "./application/ports.js";
@@ -59,53 +60,80 @@ const buildTestApp = async () => {
   return buildRoutes(ctx);
 };
 
+// Reduce a response to the single entity we assert on: its status and parsed body.
+const call = async (app: Hono, path: string, init?: RequestInit) => {
+  const res = await app.request(path, init);
+  return { status: res.status, body: (await res.json()) as unknown };
+};
+
+const postJson = (title: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ title }),
+});
+
 describe("todos api", () => {
   it("GET /todos returns the collection", async () => {
     const app = await buildTestApp();
-    const res = await app.request("/todos");
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Todo[];
-    expect(body.map((t) => t.title)).toEqual(["buy milk"]);
+    expect(await call(app, "/todos")).toEqual(
+      expect.objectContaining({
+        status: 200,
+        body: [expect.objectContaining({ title: "buy milk" })],
+      }),
+    );
   });
 
-  it("GET /todos/:id returns one, or 404 when missing", async () => {
+  it("GET /todos/:id returns the todo", async () => {
     const app = await buildTestApp();
 
-    const hit = await app.request("/todos/seed-1");
-    expect(hit.status).toBe(200);
-    expect(((await hit.json()) as Todo).title).toBe("buy milk");
-
-    const miss = await app.request("/todos/nope");
-    expect(miss.status).toBe(404);
-    expect(await miss.json()).toEqual({ error: "todo not found" });
+    expect(await call(app, "/todos/seed-1")).toEqual(
+      expect.objectContaining({
+        status: 200,
+        body: expect.objectContaining({ title: "buy milk" }),
+      }),
+    );
   });
 
-  it("POST /todos creates a todo (201) and it then shows up in the list", async () => {
+  it("GET /todos/:id returns 404 when missing", async () => {
     const app = await buildTestApp();
 
-    const created = await app.request("/todos", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "walk the dog" }),
-    });
-    expect(created.status).toBe(201);
-    expect(((await created.json()) as Todo).title).toBe("walk the dog");
+    expect(await call(app, "/todos/nope")).toEqual(
+      expect.objectContaining({ status: 404, body: { error: "todo not found" } }),
+    );
+  });
 
-    const list = (await (await app.request("/todos")).json()) as Todo[];
-    expect(list.map((t) => t.title)).toContain("walk the dog");
+  it("POST /todos creates a todo", async () => {
+    const app = await buildTestApp();
+
+    expect(await call(app, "/todos", postJson("walk the dog"))).toEqual(
+      expect.objectContaining({
+        status: 201,
+        body: expect.objectContaining({ title: "walk the dog" }),
+      }),
+    );
+  });
+
+  it("POST /todos then GET /todos includes the new todo", async () => {
+    const app = await buildTestApp();
+    await call(app, "/todos", postJson("walk the dog"));
+
+    expect(await call(app, "/todos")).toEqual(
+      expect.objectContaining({
+        status: 200,
+        body: expect.arrayContaining([expect.objectContaining({ title: "walk the dog" })]),
+      }),
+    );
   });
 
   it("POST /todos rejects an invalid body with 400", async () => {
     const app = await buildTestApp();
 
-    const res = await app.request("/todos", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "" }),
-    });
-
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toBe("invalid body");
+    expect(await call(app, "/todos", postJson(""))).toEqual(
+      expect.objectContaining({
+        status: 400,
+        body: expect.objectContaining({ error: "invalid body" }),
+      }),
+    );
   });
 });
