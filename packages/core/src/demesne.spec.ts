@@ -496,3 +496,100 @@ describe("Layer.wire: automatic assembly", () => {
     expect(events).toEqual(["acquire:A", "acquire:B(sees 1)", "release:B", "release:A"]);
   });
 });
+
+describe("Layer.forkScope: request / child scopes", () => {
+  it("shares parent services and adds request-scoped ones", async () => {
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+
+    class ReqId extends Tag("ReqId")<ReqId, { readonly id: string }>() {}
+    const RequestLayer = Layer.factory(ReqId, (ctx: Context<AppConfig>) => ({
+      id: `req-${ctx.get(AppConfig).dbUrl}`,
+    }));
+
+    const out = await Layer.forkScope(
+      appCtx,
+      RequestLayer,
+      (ctx): Result<string, never> => Ok(`${ctx.get(AppConfig).dbUrl}/${ctx.get(ReqId).id}`),
+    );
+
+    expect(out.unwrap()).toBe("u/req-u");
+  });
+
+  it("releases request-scoped resources after use, leaving the parent alive", async () => {
+    const events: string[] = [];
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+
+    class Txn extends Tag("Txn")<Txn, { readonly n: number }>() {}
+    const TxnLayer = Layer.acquireRelease(
+      Txn,
+      (ctx: Context<AppConfig>): Result<{ readonly n: number }, never> => {
+        events.push(`open(${ctx.get(AppConfig).dbUrl})`);
+        return Ok({ n: 1 });
+      },
+      () => {
+        events.push("close");
+      },
+    );
+
+    const out = await Layer.forkScope(appCtx, TxnLayer, (ctx): Result<number, never> => {
+      events.push("use");
+      return Ok(ctx.get(Txn).n);
+    });
+
+    expect(out.unwrap()).toBe(1);
+    expect(events).toEqual(["open(u)", "use", "close"]);
+    // the parent (its singletons) is untouched — still usable after the fork closed
+    expect(appCtx.get(AppConfig).dbUrl).toBe("u");
+  });
+
+  it("builds fresh request-scoped services on each fork", async () => {
+    let count = 0;
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+
+    class Seq extends Tag("Seq")<Seq, { readonly n: number }>() {}
+    const RequestLayer = Layer.make(Seq, (): Result<{ readonly n: number }, never> => {
+      count += 1;
+      return Ok({ n: count });
+    });
+
+    const a = await Layer.forkScope(
+      appCtx,
+      RequestLayer,
+      (ctx): Result<number, never> => Ok(ctx.get(Seq).n),
+    );
+    const b = await Layer.forkScope(
+      appCtx,
+      RequestLayer,
+      (ctx): Result<number, never> => Ok(ctx.get(Seq).n),
+    );
+
+    expect(a.unwrap()).toBe(1);
+    expect(b.unwrap()).toBe(2);
+    expect(count).toBe(2);
+  });
+
+  it("releases request resources even when use fails", async () => {
+    const released: string[] = [];
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+
+    class Txn extends Tag("Txn2")<Txn, { readonly n: number }>() {}
+    class ForkBoom extends TaggedError("ForkBoom")<{ why: string }> {}
+    const TxnLayer = Layer.acquireRelease(
+      Txn,
+      (): Result<{ readonly n: number }, never> => Ok({ n: 1 }),
+      () => {
+        released.push("txn");
+      },
+    );
+
+    const out = await Layer.forkScope(
+      appCtx,
+      TxnLayer,
+      (): Result<number, ForkBoom> => Err(new ForkBoom({ why: "nope" })),
+    );
+
+    expect(out.isErr()).toBe(true);
+    expect(out.unwrapErr()).toBeInstanceOf(ForkBoom);
+    expect(released).toEqual(["txn"]);
+  });
+});

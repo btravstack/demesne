@@ -370,6 +370,29 @@ const scoped = <P, E, A, E2>(
   ).flatMap((result) => result.toAsync());
 };
 
+// Fork a CHILD scope from an already-built parent context (the "request scope"):
+// build `requestLayer` against the parent — its requirements must be provided by the
+// parent, so `Needs` is `Parent | Scope` — run `use` with the parent's services PLUS
+// the request-scoped ones, then release ONLY the request-scoped resources (LIFO). The
+// parent (its long-lived singletons) is left untouched, and each fork builds fresh
+// request-scoped services. Discharges the request layer's `Scope`.
+const forkScope = <Parent, ReqP, E, A, E2>(
+  parent: Context<Parent>,
+  requestLayer: Layer<ReqP, E, Parent | Scope>,
+  use: (ctx: Context<Parent | ReqP>) => Result<A, E2> | AsyncResult<A, E2>,
+): AsyncResult<A, E | E2> => {
+  const state = makeBuildState();
+  return fromSafePromise(
+    (async (): Promise<Result<A, E | E2>> => {
+      const result = await buildMemo(requestLayer, parent as Context<any>, state).flatMap(
+        (reqCtx) => use(mergeContext(parent as Context<any>, reqCtx) as Context<Parent | ReqP>),
+      );
+      await closeScope(state);
+      return result;
+    })(),
+  ).flatMap((result) => result.toAsync());
+};
+
 // ---------------------------------------------------------------------------
 // Public surface, grouped so a reader can tell a Context operation from a Layer
 // one at a glance. `Tag` stays top-level — it names a service, building neither.
@@ -393,4 +416,5 @@ export const Layer = {
   wire,
   build,
   scoped,
+  forkScope,
 };

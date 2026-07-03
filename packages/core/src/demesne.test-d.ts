@@ -153,3 +153,25 @@ const wirePartial = Layer.wire(wireNeedsC);
 type _wirePartial = Expect<Equal<typeof wirePartial, Layer<ServiceA, EA, ServiceC>>>;
 // @ts-expect-error - ServiceC is still unmet after wire; build requires Needs = never.
 Layer.build(wirePartial);
+
+// --- 7. Layer.forkScope: request / child scopes ------------------------------
+
+declare const parentCtx: Context<ServiceA>;
+const reqLayer = Layer.factory(ServiceB, (ctx: Context<ServiceA>) => ({
+  b: ctx.get(ServiceA).a.length,
+}));
+
+// forkScope infers the parent, runs `use` with parent + request services, unions errors.
+const forked = Layer.forkScope(
+  parentCtx,
+  reqLayer,
+  (ctx): Result<string, EB> => Ok(`${ctx.get(ServiceA).a}:${ctx.get(ServiceB).b}`),
+);
+type _forked = Expect<Equal<typeof forked, AsyncResult<string, EB>>>;
+
+// A request layer needing a service the parent doesn't provide is rejected.
+const reqNeedsC = Layer.factory(ServiceB, (ctx: Context<ServiceC>) => ({
+  b: ctx.get(ServiceC).c ? 1 : 0,
+}));
+// @ts-expect-error - ServiceC is not provided by the parent Context<ServiceA>.
+Layer.forkScope(parentCtx, reqNeedsC, (): Result<number, never> => Ok(1));

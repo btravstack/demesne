@@ -79,6 +79,49 @@ await Layer.scoped(PoolLive, use); // ✅ discharges the Scope and closes it
 assignable to `Scope`), while still rejecting a graph with a real unmet service. So the
 "remember to use `scoped`" convention is now a compile error, not a footgun.
 
+## Request / child scopes
+
+Long-lived singletons (a connection pool, a config) should be built **once** and shared,
+while some services are **per-request** — a transaction, a request id, a unit-of-work.
+`Layer.forkScope(parent, requestLayer, use)` layers a short-lived child scope on top of an
+already-built parent context:
+
+```ts
+import { Layer, Tag, type Context } from "demesne";
+import { fromPromise, type Result, TaggedError } from "unthrown";
+
+// Built once, at startup — shared by every request.
+const appCtx = (await Layer.scoped(AppLive, (ctx) => Ok(ctx))).unwrap();
+
+class Txn extends Tag("Txn")<Txn, { readonly exec: (sql: string) => Promise<void> }>() {}
+class TxnError extends TaggedError("TxnError")<{ cause: unknown }> {}
+
+// Per-request: opens a transaction against the shared Pool, commits/rolls back on release.
+const RequestLive = Layer.acquireRelease(
+  Txn,
+  (ctx: Context<Pool>) => fromPromise(ctx.get(Pool).begin(), (cause) => new TxnError({ cause })),
+  (txn) => txn.commit(),
+);
+
+// One fork per request: shares the parent singletons, adds Txn, releases it (LIFO) at the end.
+const result = await Layer.forkScope(appCtx, RequestLive, (ctx) =>
+  fromPromise(ctx.get(Txn).exec("insert ..."), (cause) => new TxnError({ cause })),
+);
+// the transaction is released here; the pool and the rest of the parent stay alive
+```
+
+Notes:
+
+- **The parent is untouched.** `forkScope` only releases resources acquired by
+  `requestLayer`; the parent context (and its singletons) outlive the fork and can be
+  forked again.
+- **Fresh instances per fork.** Each call builds `requestLayer` anew, so every request
+  gets its own `Txn` — call `forkScope` once per request.
+- **The request layer may only need parent services.** Its requirements are constrained to
+  `Parent | Scope`: reading a service the parent doesn't provide is a **compile error**.
+- **Errors union.** A failure while building the request layer (`E`) or in `use` (`E2`)
+  surfaces as `AsyncResult<A, E | E2>`; the fork is closed either way.
+
 ## Future
 
 The wiring core is complete. Further ideas will be tracked in the repository's

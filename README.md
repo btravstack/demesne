@@ -352,6 +352,10 @@ A build threads a **scope** through every layer:
 - **Type-level scope enforcement** — `acquireRelease` puts a phantom `Scope` in the
   layer's requirements, so `Layer.build` **rejects a resource graph at compile time**.
   You can't accidentally leak — the compiler makes you reach for `Layer.scoped`.
+- **Request / child scopes** — `Layer.forkScope(parent, requestLayer, use)` layers a
+  short-lived child scope on a built parent: shares its singletons, adds per-request
+  services, and releases **only** those (LIFO) at the end — the parent stays alive. One
+  fork per request; the request layer may only need services the parent provides.
 
 ```ts
 const PoolLive = Layer.acquireRelease(
@@ -371,8 +375,9 @@ const summary = await Layer.scoped(provideTo(RepoLive, PoolLive), (ctx) =>
 ## Roadmap
 
 The wiring core is complete: requirements and errors as static unions, variadic `merge`,
-namespaced API, memoization, scoped resources, and **type-level scope enforcement** (the
-compiler rejects a resource graph passed to `build`). Further ideas live in
+automatic assembly (`Layer.wire`), namespaced API, memoization, scoped resources,
+**type-level scope enforcement** (the compiler rejects a resource graph passed to
+`build`), and **request / child scopes** (`Layer.forkScope`). Further ideas live in
 [`CLAUDE.md`](./CLAUDE.md).
 
 ## License
