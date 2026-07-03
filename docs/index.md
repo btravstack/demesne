@@ -22,16 +22,16 @@ hero:
       link: https://github.com/btravstack/demesne
 
 features:
-  - icon: 🧩
+  - icon: { src: /icons/wiring.svg }
     title: Requirements as a static union
     details: A dependency you forgot to wire is a compile error. You cannot build until every requirement is discharged — Needs must be never.
-  - icon: 🎯
+  - icon: { src: /icons/union-check.svg }
     title: Errors as a static union
     details: Every way construction can fail is in the result type. Handle the whole union once, at the edge, as an unthrown AsyncResult.
-  - icon: 🛡️
+  - icon: { src: /icons/shield.svg }
     title: Boundaries, not magic
     details: No decorators, no reflect-metadata, no runtime container that drifts from the types. Ports are declared in Context<R> signatures.
-  - icon: 🪶
+  - icon: { src: /icons/feather.svg }
     title: Does one thing — wiring
     details: No monad, no effect runtime of its own. Async and failure are first-class only because construction builds to an unthrown AsyncResult.
 ---
