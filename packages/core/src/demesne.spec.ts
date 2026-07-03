@@ -593,3 +593,108 @@ describe("Layer.forkScope: request / child scopes", () => {
     expect(released).toEqual(["txn"]);
   });
 });
+
+describe("Layer.override: swap providers in an assembled graph", () => {
+  // A graph where a consumer CAPTURES a dependency at construction time — the
+  // witness that override must be deep, not a post-build overwrite.
+  class Cfg extends Tag("OvCfg")<Cfg, { readonly url: string }>() {}
+  class Db extends Tag("OvDb")<Db, { readonly url: string }>() {}
+  class Repo extends Tag("OvRepo")<Repo, { readonly find: () => string }>() {}
+  class UseCase extends Tag("OvUseCase")<UseCase, { readonly run: () => string }>() {}
+
+  const CfgLive = Layer.value(Cfg, { url: "real-cfg" });
+  const DbLive = Layer.factory(Db, (c: Context<Cfg>) => ({ url: `db(${c.get(Cfg).url})` }));
+  const RepoLive = Layer.factory(Repo, (c: Context<Db>) => ({
+    find: () => `repo->${c.get(Db).url}`,
+  }));
+  const UseCaseLive = Layer.factory(UseCase, (c: Context<Repo>) => {
+    const repo = c.get(Repo); // captured at construction — a shallow swap would miss this
+    return { run: () => `usecase:${repo.find()}` };
+  });
+
+  const App = Layer.wire(CfgLive, DbLive, RepoLive, UseCaseLive);
+
+  it("replaces a provider deeply — a consumer that captured it sees the patch", async () => {
+    const fakeRepo = Layer.value(Repo, { find: () => "FAKE" });
+    const ctx = (await Layer.build(Layer.override(App, [fakeRepo]))).unwrap();
+
+    expect(ctx.get(Repo).find()).toBe("FAKE");
+    expect(ctx.get(UseCase).run()).toBe("usecase:FAKE"); // deep: use case sees the fake
+    expect(ctx.get(Db).url).toBe("db(real-cfg)"); // untouched services stay real
+  });
+
+  it("propagates an overridden intermediate through the whole chain", async () => {
+    const fakeDb = Layer.value(Db, { url: "FAKEDB" });
+    const ctx = (await Layer.build(Layer.override(App, [fakeDb]))).unwrap();
+
+    expect(ctx.get(Repo).find()).toBe("repo->FAKEDB");
+    expect(ctx.get(UseCase).run()).toBe("usecase:repo->FAKEDB");
+  });
+
+  it("keeps the base intact and can add a brand-new tag", async () => {
+    class Extra extends Tag("OvExtra")<Extra, { readonly n: number }>() {}
+    const ExtraLive = Layer.value(Extra, { n: 42 });
+    const ctx = (await Layer.build(Layer.override(App, [ExtraLive]))).unwrap();
+
+    expect(ctx.get(UseCase).run()).toBe("usecase:repo->db(real-cfg)"); // base untouched
+    expect(ctx.get(Extra).n).toBe(42); // patch added a new service
+  });
+
+  it("still runs the base's resource finalizers (base body runs; its value is discarded)", async () => {
+    const events: string[] = [];
+    class Conn extends Tag("OvConn")<Conn, { readonly tag: string }>() {}
+    const ConnLive = Layer.acquireRelease(
+      Conn,
+      (): Result<{ readonly tag: string }, never> => {
+        events.push("acquire-real");
+        return Ok({ tag: "real" });
+      },
+      () => {
+        events.push("release-real");
+      },
+    );
+    const Base = Layer.wire(ConnLive);
+    const fakeConn = Layer.value(Conn, { tag: "fake" });
+
+    const out = await Layer.scoped(
+      Layer.override(Base, [fakeConn]),
+      (ctx): Result<string, never> => Ok(ctx.get(Conn).tag),
+    );
+
+    expect(out.unwrap()).toBe("fake"); // consumers see the patch
+    // the base resource's own body still ran and was torn down (best-effort, LIFO)
+    expect(events).toEqual(["acquire-real", "release-real"]);
+  });
+
+  it("short-circuits when a patch fails to construct", async () => {
+    class Flaky extends Tag("OvFlaky")<Flaky, { readonly ok: boolean }>() {}
+    class OvBoom extends TaggedError("OvBoom")<{ why: string }> {}
+    const flakyPatch = Layer.make(
+      Flaky,
+      (): Result<{ readonly ok: boolean }, OvBoom> => Err(new OvBoom({ why: "nope" })),
+    );
+
+    const out = await Layer.build(Layer.override(App, [flakyPatch]));
+
+    expect(out.isErr()).toBe(true);
+    expect(out.unwrapErr()).toBeInstanceOf(OvBoom);
+  });
+
+  it("wins even over a service supplied by the surrounding context", async () => {
+    class Ext extends Tag("OvExt")<Ext, { readonly v: string }>() {}
+    class Consumer extends Tag("OvConsumer")<Consumer, { readonly v: string }>() {}
+    // Base needs Ext (provided from outside) and a consumer captures it.
+    const ConsumerLive = Layer.factory(Consumer, (c: Context<Ext>) => ({ v: c.get(Ext).v }));
+    const Base = Layer.wire(ConsumerLive);
+
+    const realExt = Layer.value(Ext, { v: "ambient" });
+    const fakeExt = Layer.value(Ext, { v: "override" });
+    // Feed the *real* Ext from the surrounding context, then override it: the patch
+    // must beat both the base graph and the ambient value.
+    const graph = Layer.provideTo(Layer.override(Base, [fakeExt]), realExt);
+    const ctx = (await Layer.build(graph)).unwrap();
+
+    expect(ctx.get(Ext).v).toBe("override");
+    expect(ctx.get(Consumer).v).toBe("override");
+  });
+});

@@ -128,7 +128,7 @@ short-circuit, throw → Defect, and an N-way merge.)_
 
 The public value surface is grouped into companion objects so a reader can tell a
 Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,merge,
-provideTo,wire,build,scoped,forkScope}` and `Context.{empty}`. `Context` and `Layer` are each **both a
+provideTo,wire,override,build,scoped,forkScope}` and `Context.{empty}`. `Context` and `Layer` are each **both a
 type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
 `Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
 not re-flatten these into top-level function exports.
@@ -180,26 +180,46 @@ releases request resources LIFO with the parent untouched; fresh instances per f
 release-on-`use`-failure. And the type-level tests: parent inferred; a request layer
 needing a non-parent service is rejected.)_
 
+### 13. `override` re-assembles a wired graph with patched providers, deeply
+
+`override(base, patches)` replaces specific tags' providers inside an assembled graph. It
+is **deep by re-assembly**, not a post-build overwrite: a consumer that captured a
+dependency at construction (e.g. a use case doing `ctx.get(Repo)` in its factory) must see
+the patch, so a shallow swap of the final context is wrong. `base` is therefore constrained
+to a **`WiredLayer`** — the branded result of `Layer.wire`, which carries its source layers
+(`WireSourceId`, an internal symbol) — because only the source layers can be re-resolved;
+a plain (opaque) `Layer` has already consumed its deps and is a **compile error**. At
+runtime: build the patches first (against the outer context), collect the keys they
+introduce or change into a **protected set**, then re-run `resolveWire` over the base's
+source layers with those keys seeded and locked — every base provider still runs (its
+finalizers register) but its value for a protected key is discarded, so consumers read the
+patched value. Patches may depend only on services **outside** the base (not double-building
+the base). Provides `P | Ps`, errors union, `Needs = Exclude<N | Ns, Ps>`. **Infer the base
+as a whole `B extends WiredLayer<any,any,any>` and pull channels with `ProvidesOf`/`ErrorOf`/
+`NeedsOf`** — do **not** infer `N` from a `WiredLayer<P,E,N>` parameter directly (it sits in
+a contravariant position and degrades to `any`). _(Guarded by the spec: deep replace,
+intermediate propagation, add-a-new-tag, base resource still torn down, patch-error
+short-circuit, wins over an ambient outer value. And the type-level tests: provides/errors/
+needs computed; a new tag joins provides; a non-wired base is rejected.)_
+
 ## Roadmap — ideas from the wider DI ecosystem
 
-The wiring core is complete. Two roadmap items are **now implemented**: `Layer.wire`
+The wiring core is complete. Three roadmap items are **now implemented**: `Layer.wire`
 (automatic assembly) provides the union of every service, unions errors, and leaves
 `Needs = Exclude<allNeeds, allProvides>`, resolving order in rounds at runtime (a layer
 reading a not-yet-built dep is deferred; a cycle is a runtime `Defect`) — do **not** try
-to make it topologically sort by types (they're erased) or memoize failed attempts; and
-`Layer.forkScope` (request / child scopes, see invariant #12). Remaining future work,
-borrowed selectively from mature DI systems **without** violating the thesis, prioritized:
+to make it topologically sort by types (they're erased) or memoize failed attempts;
+`Layer.forkScope` (request / child scopes, see invariant #12); and `Layer.override` (the
+test override combinator, see invariant #13). Remaining future work, borrowed selectively
+from mature DI systems **without** violating the thesis, prioritized:
 
-1. **Test `override` combinator** (from Guice `Modules.override`, Nest `overrideProvider`,
-   shaku `with_component_override`). `Layer.override(base, patch)` — replace specific
-   tags' providers deep in an assembled graph while keeping the rest.
-2. **Multi-bindings / plugin collections** (from Guice `@IntoSet`, Angular `multi`,
+1. **Multi-bindings / plugin collections** (from Guice `@IntoSet`, Angular `multi`,
    .NET keyed services). Accumulate N implementations of a port into a `readonly Item[]`
    service — for plugin architectures, without a runtime registry.
-3. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
+2. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
    Clojure Integrant). An optional `onStart` run after the whole graph is built, ordered
    topologically — for migrations, warmups, health gating.
-4. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
+3. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
 
 Already solved elegantly, document it as the answer: **assisted injection**
 (injected deps + call-time args) is the constructor-injected use-case pattern

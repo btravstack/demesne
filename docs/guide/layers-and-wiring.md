@@ -115,6 +115,36 @@ short-circuits; a genuine dependency **cycle** surfaces as a `Defect` at runtime
 types can't catch cycles). Pass the individual `*Live` layers — not pre-composed ones.
 :::
 
+### `Layer.override` — swap providers in an assembled graph
+
+The testing seam. **`Layer.override(base, patches)`** takes a `Layer.wire`-assembled graph
+and a list of patch layers whose providers **win**, keeping everything else — swap a real
+adapter for a fake without hand-rewiring the graph.
+
+```ts
+const AppLayer = Layer.wire(GetOrderLive, LoggerLive, OrderRepoLive, DatabaseLive, ConfigLive);
+
+// in a test — same graph, one provider swapped:
+const TestApp = Layer.override(AppLayer, [Layer.value(OrderRepository, fakeRepo)]);
+const ctx = (await Layer.build(TestApp)).unwrap();
+ctx.get(OrderRepository); // the fake — and so does every layer that consumed it
+```
+
+The override is **deep**: a use case that captured `OrderRepository` in its constructor
+sees the fake too — not just a direct `ctx.get`. That's why `base` must be a `wire` result
+(only that carries the source layers to re-assemble); a plain, already-built layer has
+consumed its dependencies and is a compile error here. The provides union gains any new
+tag a patch introduces, errors union, and a patch that supplies a tag the base needed
+externally **discharges** that requirement.
+
+::: tip Patches are usually `Layer.value`
+Overrides are typically `Layer.value(Tag, fake)`. A patch may also be a `factory` / `make`,
+but it may only depend on services available **outside** the base (the base's own services
+aren't threaded into it). The base's original provider for a patched tag still runs — so if
+you override a resource (`acquireRelease`) tag, the base resource is still acquired and
+released; its value is simply discarded.
+:::
+
 ### `Layer.build` — run a fully-wired layer
 
 Callable only once `Needs` is `never`. The `AsyncResult` still carries `E`, since
