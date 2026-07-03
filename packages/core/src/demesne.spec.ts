@@ -380,3 +380,119 @@ describe("scopes: acquireRelease + scoped", () => {
     expect(released).toEqual(["A"]); // A still released after B's release threw
   });
 });
+
+describe("Layer.wire: automatic assembly", () => {
+  it("assembles a graph given in any order, providing every service", async () => {
+    const LoggerLive = Layer.value(LoggerService, { log: () => {} });
+    const ConfigLive = Layer.make(
+      AppConfig,
+      (): Result<ServiceOf<typeof AppConfig>, never> => Ok({ dbUrl: "postgres://localhost/app" }),
+    );
+    // make with a dependency (defers via a Defect until AppConfig is ready)
+    const DatabaseLive = Layer.make(DatabaseService, (ctx: Context<AppConfig>) => {
+      ctx.get(AppConfig);
+      return Ok<ServiceOf<typeof DatabaseService>>({ query: () => [] }).toAsync();
+    });
+    // factory with a dependency (defers via a synchronous throw until Database is ready)
+    const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<DatabaseService>) => {
+      const db = ctx.get(DatabaseService);
+      return {
+        findById: (id) =>
+          (db.query(`q ${id}`)[0] as Order | undefined) === undefined
+            ? Err(new OrderNotFound({ id })).toAsync()
+            : Ok(db.query(`q ${id}`)[0] as Order).toAsync(),
+      };
+    });
+
+    // Deliberately listed dependents-before-dependencies — wire figures out the order.
+    const app = Layer.wire(OrderRepoLive, LoggerLive, DatabaseLive, ConfigLive);
+    const result = await Layer.build(app);
+
+    expect(result.isOk()).toBe(true);
+    const ctx = result.unwrap();
+    ctx.get(LoggerService).log("ok");
+    // intermediates are provided too, not hidden
+    expect(ctx.get(AppConfig).dbUrl).toBe("postgres://localhost/app");
+    const found = await ctx.get(OrderRepository).findById("order-1");
+    expect(found.unwrapErr()).toBeInstanceOf(OrderNotFound);
+  });
+
+  it("short-circuits on the first construction Err", async () => {
+    const Good = Layer.value(Marker, { ok: true });
+    const Bad = Layer.make(
+      AppConfig,
+      (): Result<ServiceOf<typeof AppConfig>, ConfigError> =>
+        Err(new ConfigError({ reason: "nope" })),
+    );
+
+    const result = await Layer.build(Layer.wire(Good, Bad));
+
+    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr()).toBeInstanceOf(ConfigError);
+  });
+
+  it("a genuine throw during construction propagates as a Defect", async () => {
+    const Boom = Layer.factory(Marker, (): ServiceOf<typeof Marker> => {
+      throw new Error("boom");
+    });
+
+    const result = await Layer.build(Layer.wire(Boom, Layer.value(AppConfig, { dbUrl: "x" })));
+
+    expect(result.isDefect()).toBe(true);
+  });
+
+  it("a dependency cycle among wired layers becomes a Defect", async () => {
+    class TagX extends Tag("TagX")<TagX, { readonly x: number }>() {}
+    class TagY extends Tag("TagY")<TagY, { readonly y: number }>() {}
+    const X = Layer.make(
+      TagX,
+      (ctx: Context<TagY>): Result<{ readonly x: number }, never> => Ok({ x: ctx.get(TagY).y }),
+    );
+    const Y = Layer.make(
+      TagY,
+      (ctx: Context<TagX>): Result<{ readonly y: number }, never> => Ok({ y: ctx.get(TagX).x }),
+    );
+
+    // Types allow it (Needs = Exclude<TagX | TagY, TagX | TagY> = never); the cycle is a
+    // runtime Defect.
+    const result = await Layer.build(Layer.wire(X, Y));
+
+    expect(result.isDefect()).toBe(true);
+  });
+
+  it("orders wired acquireRelease layers and releases them in reverse (LIFO)", async () => {
+    const events: string[] = [];
+    class WPoolA extends Tag("WPoolA")<WPoolA, { readonly id: number }>() {}
+    class WPoolB extends Tag("WPoolB")<WPoolB, { readonly id: number }>() {}
+
+    const A = Layer.acquireRelease(
+      WPoolA,
+      (): Result<{ readonly id: number }, never> => {
+        events.push("acquire:A");
+        return Ok({ id: 1 });
+      },
+      () => {
+        events.push("release:A");
+      },
+    );
+    const B = Layer.acquireRelease(
+      WPoolB,
+      (ctx: Context<WPoolA>): Result<{ readonly id: number }, never> => {
+        events.push(`acquire:B(sees ${ctx.get(WPoolA).id})`);
+        return Ok({ id: 2 });
+      },
+      () => {
+        events.push("release:B");
+      },
+    );
+
+    // B needs A; wire resolves the order, and the resulting graph needs a Scope.
+    const out = await Layer.scoped(
+      Layer.wire(B, A),
+      (ctx): Result<number, never> => Ok(ctx.get(WPoolB).id),
+    );
+
+    expect(out.unwrap()).toBe(2);
+    expect(events).toEqual(["acquire:A", "acquire:B(sees 1)", "release:B", "release:A"]);
+  });
+});

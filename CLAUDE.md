@@ -128,7 +128,7 @@ short-circuit, throw → Defect, and an N-way merge.)_
 
 The public value surface is grouped into companion objects so a reader can tell a
 Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,merge,
-provideTo,build,scoped}` and `Context.{empty}`. `Context` and `Layer` are each **both a
+provideTo,wire,build,scoped}` and `Context.{empty}`. `Context` and `Layer` are each **both a
 type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
 `Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
 not re-flatten these into top-level function exports.
@@ -166,29 +166,29 @@ a real unmet service is rejected.)_
 
 ## Roadmap — ideas from the wider DI ecosystem
 
-The wiring core is complete. Future work should be borrowed selectively from mature DI
-systems **without** violating the thesis. Prioritized:
+The wiring core is complete, and `Layer.wire` (automatic assembly, the top item below)
+is **now implemented** — it provides the union of every service, unions errors, and
+leaves `Needs = Exclude<allNeeds, allProvides>`; the runtime resolves the order in rounds
+(a layer reading a not-yet-built dep is deferred; a cycle is a runtime `Defect`). Do
+**not** try to make `wire` topologically sort by types at runtime (they're erased) or
+memoize failed attempts. Remaining future work, borrowed selectively from mature DI
+systems **without** violating the thesis, prioritized:
 
-1. **`Layer.wire(...layers)` — automatic assembly** (from ZIO `ZLayer.make`, MacWire,
-   google/wire). Given a bag of layers, resolve the DAG and return the fully-provided
-   layer, with a compile error naming any unmet/ambiguous tag. Kills composition-root
-   boilerplate while keeping every type guarantee and boundary declaration. **Highest
-   leverage.**
-2. **Request / child scopes + real lifetimes** (from .NET `scoped`, Inversify request
+1. **Request / child scopes + real lifetimes** (from .NET `scoped`, Inversify request
    scope, Effect `Scope.fork`). A child scope carved from a built context: shares the
    singletons, adds request-scoped services, closes LIFO at request end without tearing
    down the app. The missing lifetime — what makes demesne usable for HTTP servers.
-   Pairs with the existing `Scope` marker.
-3. **Test `override` combinator** (from Guice `Modules.override`, Nest `overrideProvider`,
+   Pairs with the existing `Scope` marker. **Now the highest-leverage remaining item.**
+2. **Test `override` combinator** (from Guice `Modules.override`, Nest `overrideProvider`,
    shaku `with_component_override`). `Layer.override(base, patch)` — replace specific
    tags' providers deep in an assembled graph while keeping the rest.
-4. **Multi-bindings / plugin collections** (from Guice `@IntoSet`, Angular `multi`,
+3. **Multi-bindings / plugin collections** (from Guice `@IntoSet`, Angular `multi`,
    .NET keyed services). Accumulate N implementations of a port into a `readonly Item[]`
    service — for plugin architectures, without a runtime registry.
-5. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
+4. **Lifecycle hooks distinct from construction** (from uber/fx `OnStart`/`OnStop`,
    Clojure Integrant). An optional `onStart` run after the whole graph is built, ordered
    topologically — for migrations, warmups, health gating.
-6. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
+5. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid.
 
 Already solved elegantly, document it as the answer: **assisted injection**
 (injected deps + call-time args) is the constructor-injected use-case pattern

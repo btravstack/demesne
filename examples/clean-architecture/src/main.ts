@@ -1,6 +1,7 @@
-// Composition root — bind adapters to ports, then wire the application layer on top.
-// `Layer.build` runs the whole graph once at the edge; you resolve a use case from the
-// built context and call `execute`. No manual construction.
+// Composition root — hand every layer to `Layer.wire` and it resolves the order
+// automatically (GetOrder needs the repo + logger, the repo needs the DB, the DB needs
+// config…). `Layer.build` runs the whole graph once at the edge; you resolve a use case
+// from the built context and call `execute`. No manual `provideTo` / `merge` threading.
 
 import { Layer } from "demesne";
 
@@ -10,19 +11,13 @@ import { LoggerLive } from "./adapters/logger.js";
 import { OrderRepoLive } from "./adapters/order-repository.js";
 import { GetOrder, GetOrderLive } from "./application/get-order.js";
 
-// Infrastructure — adapters wired to their ports.
-const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
-const OrderRepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
-const ServicesLayer = Layer.merge(LoggerLive, OrderRepoWired);
-//    ^? Layer<Logger | OrderRepository, ConnectionError | ConfigError, never>
-
-// Application — use cases, each constructor-injected from the services. The built
-// context exposes only the use cases; the infrastructure ports stay hidden.
-const AppLayer = Layer.provideTo(GetOrderLive, ServicesLayer);
-//    ^? Layer<GetOrder, ConnectionError | ConfigError, never>
+// Listed in any order — wire figures out the dependency graph and reports (at compile
+// time) any layer whose requirement no other layer provides.
+const AppLayer = Layer.wire(GetOrderLive, LoggerLive, OrderRepoLive, DatabaseLive, ConfigLive);
+//    ^? Layer<GetOrder | Logger | OrderRepository | Database | AppConfig, ConnectionError | ConfigError, never>
 
 const wiring = await Layer.build(AppLayer);
-//    ^? Result<Context<GetOrder>, ConnectionError | ConfigError>
+//    ^? Result<Context<GetOrder | …>, ConnectionError | ConfigError>
 
 if (wiring.isOk()) {
   // Resolve the wired use case and run it — demesne already injected its ports.

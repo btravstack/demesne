@@ -236,28 +236,22 @@ const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<Database>) =>
 
 ### Composition root
 
-Bind adapters to ports, then wire the **application layer** of use cases on top.
-`Layer.build` runs the whole graph once at the edge (handling every **wiring** failure
-as a static union); you then resolve a use case from the built context and call
-`execute`. The built context exposes only the use cases — the infrastructure stays
-hidden.
+Hand every layer to **`Layer.wire`** and it resolves the dependency order for you — no
+manual `provideTo` / `merge` threading. `Layer.build` runs the whole graph once at the
+edge (handling every **wiring** failure as a static union); you then resolve a use case
+from the built context and call `execute`.
 
 ```ts
 // main.ts
 import { Layer } from "demesne";
 
-// Infrastructure — adapters wired to their ports.
-const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
-const OrderRepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
-const ServicesLayer = Layer.merge(LoggerLive, OrderRepoWired);
-//    ^? Layer<Logger | OrderRepository, ConnectionError | ConfigError, never>
-
-// Application — use cases, constructor-injected from the services.
-const AppLayer = Layer.provideTo(GetOrderLive, ServicesLayer);
-//    ^? Layer<GetOrder, ConnectionError | ConfigError, never>
+// Listed in any order — wire figures out the graph, and any layer whose requirement no
+// other layer provides is a compile error.
+const AppLayer = Layer.wire(GetOrderLive, LoggerLive, OrderRepoLive, DatabaseLive, ConfigLive);
+//    ^? Layer<GetOrder | Logger | OrderRepository | Database | AppConfig, ConnectionError | ConfigError, never>
 
 const wiring = await Layer.build(AppLayer);
-//    ^? Result<Context<GetOrder>, ConnectionError | ConfigError>
+//    ^? Result<Context<GetOrder | …>, ConnectionError | ConfigError>
 
 if (wiring.isOk()) {
   // Resolve the wired use case and run it — demesne already injected its ports.

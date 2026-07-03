@@ -122,3 +122,34 @@ type _scopedPlain = Expect<Equal<typeof scopedPlain, AsyncResult<number, EA>>>;
 declare const unwiredResource: Layer<ServiceA, never, ServiceB>;
 // @ts-expect-error - scoped still requires real services (ServiceB) to be wired first.
 Layer.scoped(unwiredResource, (): Result<number, never> => Ok(1));
+
+// --- 6. Layer.wire: automatic assembly ---------------------------------------
+
+const wireA = Layer.make(ServiceA, (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }));
+const wireB = Layer.make(
+  ServiceB,
+  (ctx: Context<ServiceA>): Result<{ readonly b: number }, EB> =>
+    Ok({ b: ctx.get(ServiceA).a.length }),
+);
+
+// wire unions Provides and Error, and computes Needs = all needs minus all provides.
+// Listed in any order; wireB's need (ServiceA) is provided by wireA, so Needs = never.
+const wiredAB = Layer.wire(wireB, wireA);
+type _wiredAB = Expect<Equal<typeof wiredAB, Layer<ServiceA | ServiceB, EA | EB, never>>>;
+
+// Self-contained → build accepts it, and every service is provided.
+const wiredABResult = Layer.build(wiredAB);
+type _wiredABResult = Expect<
+  Equal<typeof wiredABResult, AsyncResult<Context<ServiceA | ServiceB>, EA | EB>>
+>;
+
+// A need that no layer in the set provides stays in Needs, so `build` rejects it.
+const wireNeedsC = Layer.make(
+  ServiceA,
+  (ctx: Context<ServiceC>): Result<{ readonly a: string }, EA> =>
+    Ok({ a: String(ctx.get(ServiceC).c) }),
+);
+const wirePartial = Layer.wire(wireNeedsC);
+type _wirePartial = Expect<Equal<typeof wirePartial, Layer<ServiceA, EA, ServiceC>>>;
+// @ts-expect-error - ServiceC is still unmet after wire; build requires Needs = never.
+Layer.build(wirePartial);

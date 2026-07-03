@@ -75,10 +75,14 @@ export interface Context<in R> {
   get<Self extends R, Service>(tag: Tag<Self, Service>): Service;
 }
 
+// Shared phantom `_R` no-op — the variance marker never runs; one instance so both
+// context factories reference the same function.
+const noopR = (): void => {};
+
 const makeContext = (map: ReadonlyMap<string, unknown>): Context<any> => ({
   [ContextTypeId]: ContextTypeId,
   unsafeMap: map,
-  _R: () => {},
+  _R: noopR,
   get(tag) {
     if (!map.has(tag.key)) {
       throw new Error(`mini-di: service "${tag.key}" not found in context`);
@@ -95,6 +99,23 @@ const unsafeAdd = (ctx: Context<any>, key: string, service: unknown): Context<an
 
 const mergeContext = (a: Context<any>, b: Context<any>): Context<any> =>
   makeContext(new Map([...a.unsafeMap, ...b.unsafeMap]));
+
+// Thrown by the probe context `wire` builds against while it discovers a build order:
+// a layer that reads a not-yet-constructed dependency signals "not ready" (so `wire`
+// defers it to a later round) rather than failing. Distinct from a genuine bug.
+class MissingDependency extends Error {}
+
+const makeProbeContext = (map: ReadonlyMap<string, unknown>): Context<any> => ({
+  [ContextTypeId]: ContextTypeId,
+  unsafeMap: map,
+  _R: noopR,
+  get(tag) {
+    if (!map.has(tag.key)) {
+      throw new MissingDependency(tag.key);
+    }
+    return map.get(tag.key) as never;
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Layer<Provides, E, Needs> — a recipe that builds the services in `Provides`,
@@ -253,6 +274,75 @@ const provideTo = <P, E, N, P2, E2, N2>(
     ),
 });
 
+// Resolve a set of layers by repeatedly building those whose dependencies are already
+// available (a layer that reads a missing service is deferred), until every layer has
+// built — then merge all their provisions into one context. A layer's dependencies may
+// be satisfied by ANY other layer in the set, so order doesn't matter; a first Err
+// short-circuits, and no forward progress means a dependency cycle.
+const resolveWire = async (
+  layers: readonly Layer<any, any, any>[],
+  outerCtx: Context<any>,
+  state: BuildState,
+): Promise<Result<Context<any>, any>> => {
+  const acc = new Map(outerCtx.unsafeMap);
+  const probe = makeProbeContext(acc);
+  let remaining = layers;
+
+  while (remaining.length > 0) {
+    const outcomes = await Promise.all(
+      remaining.map(async (layer) => {
+        try {
+          const result = await layer.build(probe, state);
+          if (result.isOk()) return { layer, ctx: result.unwrap() };
+          if (result.isDefect() && result.cause instanceof MissingDependency) {
+            return { layer, pending: true };
+          }
+          return { fail: result };
+        } catch (thrown) {
+          if (thrown instanceof MissingDependency) return { layer, pending: true };
+          throw thrown;
+        }
+      }),
+    );
+
+    const pending: Layer<any, any, any>[] = [];
+    let progressed = false;
+    for (const outcome of outcomes) {
+      if ("fail" in outcome) return outcome.fail;
+      if ("pending" in outcome) {
+        pending.push(outcome.layer);
+      } else {
+        for (const [key, service] of outcome.ctx.unsafeMap) acc.set(key, service);
+        progressed = true;
+      }
+    }
+    if (!progressed) {
+      throw new Error("demesne: Layer.wire found a dependency cycle among the given layers.");
+    }
+    remaining = pending;
+  }
+
+  return Ok(makeContext(acc));
+};
+
+// Automatically assemble a set of layers: each layer's requirements may be satisfied by
+// any other layer in the set, so you list them in any order instead of hand-threading
+// `provideTo` / `merge`. Provides the UNION of every service; errors union; the only
+// remaining `Needs` are those no layer in the set provides — so a self-contained set is
+// `Needs = never` and a missing dependency stays in the type (and `build` rejects it).
+const wire = <Ls extends readonly [Layer<any, any, any>, ...Layer<any, any, any>[]]>(
+  ...layers: Ls
+): Layer<
+  ProvidesOf<Ls[number]>,
+  ErrorOf<Ls[number]>,
+  Exclude<NeedsOf<Ls[number]>, ProvidesOf<Ls[number]>>
+> => ({
+  build: (ctx, state) =>
+    fromSafePromise(
+      resolveWire(layers as readonly Layer<any, any, any>[], ctx as Context<any>, state),
+    ).flatMap((result) => result.toAsync()),
+});
+
 // Build a fully-wired layer. Callable once `Needs` is `never` — a graph that still
 // needs a `Scope` (contains `acquireRelease` layers) is a COMPILE error here; use
 // `scoped`. The AsyncResult still carries `E`. Shared layers construct once.
@@ -292,5 +382,15 @@ const scoped = <P, E, A, E2>(
 export const Context = { empty };
 
 // Layer constructors (`value` / `factory` / `make` / `acquireRelease`), combinators
-// (`merge` / `provideTo`), and the terminals `build` / `scoped`.
-export const Layer = { value, factory, make, acquireRelease, merge, provideTo, build, scoped };
+// (`merge` / `provideTo` / `wire`), and the terminals `build` / `scoped`.
+export const Layer = {
+  value,
+  factory,
+  make,
+  acquireRelease,
+  merge,
+  provideTo,
+  wire,
+  build,
+  scoped,
+};

@@ -85,6 +85,36 @@ const AppLayer = Layer.merge(LoggerLive, RepoWired, DatabaseWired);
 //    ^? Layer<Logger | OrderRepository | Database, ConnectionError | ConfigError, never>
 ```
 
+### `Layer.wire` — assemble a set automatically
+
+`merge` builds its layers _independently_ (they don't feed each other); `provideTo`
+threads one into another _by hand_. **`Layer.wire`** does the threading for you: each
+layer's requirements may be satisfied by **any other layer in the set**, so you list them
+in any order and wire resolves the dependency graph.
+
+```ts
+// before — hand-threaded, order matters
+const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
+const RepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
+const AppLayer = Layer.merge(LoggerLive, RepoWired, DatabaseWired);
+
+// after — one call, any order
+const AppLayer = Layer.wire(OrderRepoLive, LoggerLive, ConfigLive, DatabaseLive);
+//    ^? Layer<OrderRepository | Logger | AppConfig | Database, ConnectionError | ConfigError, never>
+```
+
+wire provides the **union of every service** (intermediates included), unions the errors,
+and its remaining `Needs` are exactly the services **no layer in the set provides**. So a
+self-contained set is `Needs = never` (ready to `build`), and a missing dependency stays
+in the type — `build` names it as a compile error.
+
+::: tip Runtime & limits
+wire builds each layer once a round against the services built so far (a layer that reads
+a not-yet-built dependency is deferred), so **order doesn't matter**. A first `Err`
+short-circuits; a genuine dependency **cycle** surfaces as a `Defect` at runtime (the
+types can't catch cycles). Pass the individual `*Live` layers — not pre-composed ones.
+:::
+
 ### `Layer.build` — run a fully-wired layer
 
 Callable only once `Needs` is `never`. The `AsyncResult` still carries `E`, since
