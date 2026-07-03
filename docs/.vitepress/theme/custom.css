@@ -4,3 +4,35 @@
 :root {
   --accent: #b45ce0;
 }
+
+/* Home-hero background glyph — the project's motif behind the hero (a walled
+ * demesne / keep on a baseline). Painted in --accent through a mask, so it
+ * always tracks the accent token; the SVG is base64-encoded so no CSS minifier
+ * can mangle it. `position: relative` gives the glyph its positioning context
+ * (kept here so this file stands alone, even though the shared theme also
+ * sets it). */
+.VPHome {
+  position: relative;
+}
+.VPHome::after {
+  content: "";
+  position: absolute;
+  top: 30px;
+  right: 0;
+  width: 560px;
+  max-width: 56vw;
+  aspect-ratio: 500 / 300;
+  background-color: var(--accent);
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgMzAwIiBmaWxsPSJub25lIj48cGF0aCBkPSJNNjAsODAgVjYwIEg5MCBWNDUgSDEyMCBWNjAgSDE1MCBWNDUgSDE4MCBWNjAgSDIxMCBWODAiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyIi8+PHBhdGggZD0iTTYwLDgwIFYyNDAgTTIxMCw4MCBWMjQwIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIvPjxwYXRoIGQ9Ik0zMCwyNDAgSDUwMCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIiLz48cGF0aCBkPSJNMjkwLDI0MCBWMTQwIEwzNTAsMTEwIEw0MTAsMTQwIFYyNDAiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyIi8+PC9zdmc+")
+    no-repeat top right / contain;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgMzAwIiBmaWxsPSJub25lIj48cGF0aCBkPSJNNjAsODAgVjYwIEg5MCBWNDUgSDEyMCBWNjAgSDE1MCBWNDUgSDE4MCBWNjAgSDIxMCBWODAiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyIi8+PHBhdGggZD0iTTYwLDgwIFYyNDAgTTIxMCw4MCBWMjQwIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIvPjxwYXRoIGQ9Ik0zMCwyNDAgSDUwMCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIiLz48cGF0aCBkPSJNMjkwLDI0MCBWMTQwIEwzNTAsMTEwIEw0MTAsMTQwIFYyNDAiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyIi8+PC9zdmc+")
+    no-repeat top right / contain;
+  opacity: 0.13;
+  pointer-events: none;
+  z-index: 0;
+}
+@media (max-width: 768px) {
+  .VPHome::after {
+    display: none;
+  }
+}
