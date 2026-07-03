@@ -103,7 +103,6 @@ describe("happy path: a value + factory + make graph builds to Ok", () => {
     expect(logs).toEqual(["app wired"]);
     // A service operation is itself an unthrown AsyncResult — await and inspect it.
     const found = await ctx.get(OrderRepository).findById("order-1");
-    expect(found.isErr()).toBe(true);
     expect(found.unwrapErr()).toBeInstanceOf(OrderNotFound);
     // Note: `ctx.get(AppConfig)` would be a COMPILE error here — AppConfig is
     // consumed by `provideTo` and is not in AppLayer's Provides union.
@@ -134,10 +133,10 @@ describe("error union at the edge", () => {
     });
     expect(message).toBe("config:DB_URL must be a postgres:// url");
 
-    // the err payload is the expected TaggedError, narrowable by `_tag`.
-    const error = result.unwrapErr();
-    expect(error).toBeInstanceOf(ConfigError);
-    expect(error._tag).toBe("ConfigError");
+    // the err payload is the expected TaggedError, asserted as one shape.
+    expect(result.unwrapErr()).toEqual(
+      expect.objectContaining({ _tag: "ConfigError", reason: "DB_URL must be a postgres:// url" }),
+    );
   });
 });
 
@@ -206,7 +205,6 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.merge(Good, Bad));
 
-    expect(result.isErr()).toBe(true);
     expect(result.unwrapErr()).toBeInstanceOf(ConfigError);
   });
 
@@ -344,7 +342,6 @@ describe("scopes: acquireRelease + scoped", () => {
 
     const out = await Layer.scoped(A, (): Result<number, Boom> => Err(new Boom({ why: "nope" })));
 
-    expect(out.isErr()).toBe(true);
     expect(out.unwrapErr()).toBeInstanceOf(Boom);
     expect(released).toEqual(["A"]); // released despite the failure
   });
@@ -427,7 +424,6 @@ describe("Layer.wire: automatic assembly", () => {
 
     const result = await Layer.build(Layer.wire(Good, Bad));
 
-    expect(result.isErr()).toBe(true);
     expect(result.unwrapErr()).toBeInstanceOf(ConfigError);
   });
 
@@ -588,7 +584,6 @@ describe("Layer.forkScope: request / child scopes", () => {
       (): Result<number, ForkBoom> => Err(new ForkBoom({ why: "nope" })),
     );
 
-    expect(out.isErr()).toBe(true);
     expect(out.unwrapErr()).toBeInstanceOf(ForkBoom);
     expect(released).toEqual(["txn"]);
   });
@@ -676,7 +671,6 @@ describe("Layer.override: swap providers in an assembled graph", () => {
 
     const out = await Layer.build(Layer.override(App, [flakyPatch]));
 
-    expect(out.isErr()).toBe(true);
     expect(out.unwrapErr()).toBeInstanceOf(OvBoom);
   });
 
@@ -711,8 +705,11 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     const ctx = (await Layer.build(Layer.collect(Plugins, [A, B, C]))).unwrap();
     const plugins = ctx.get(Plugins);
 
-    expect(plugins.map((p) => p.name)).toEqual(["a", "b", "c"]);
-    expect(plugins).toHaveLength(3);
+    expect(plugins).toEqual([
+      { name: "a", weight: 1 },
+      { name: "b", weight: 2 },
+      { name: "c", weight: 3 },
+    ]);
   });
 
   it("threads each member's own requirements, satisfied by the surrounding wire", async () => {
@@ -762,7 +759,6 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     );
 
     const out = await Layer.build(Layer.collect(Plugins, [A, Bad]));
-    expect(out.isErr()).toBe(true);
     expect(out.unwrapErr()).toBeInstanceOf(MbBoom);
   });
 });
@@ -815,17 +811,14 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
 
   it("aborts startup on a failing hook before use, and unions its error into E", async () => {
     class MigrationError extends TaggedError("MigrationError")<{ why: string }> {}
-    let used = false;
     const DbLive = Layer.onStart(
       Layer.factory(Db, () => ({ url: "db" })),
       (): Result<void, MigrationError> => Err(new MigrationError({ why: "schema drift" })),
     );
 
     const out = await Layer.build(Layer.wire(DbLive));
-    // used stays false because `build` has no `use`; assert the error surfaced:
-    expect(out.isErr()).toBe(true);
+    // a failed start hook surfaces as the graph's Err (build has no `use` to reach).
     expect(out.unwrapErr()).toBeInstanceOf(MigrationError);
-    expect(used).toBe(false);
   });
 
   it("closes the scope even when a start hook fails (teardown still runs)", async () => {

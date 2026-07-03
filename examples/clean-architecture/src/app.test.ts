@@ -11,21 +11,21 @@ import { AppLayer, AppStarted } from "./app.js";
 import { GetOrder } from "./application/get-order.js";
 import { OrderRepository } from "./application/ports.js";
 import { AuditSinks } from "./application/plugins.js";
-import type { Order } from "./domain/order.js";
+import { type Order, OrderNotFound } from "./domain/order.js";
 
 describe("clean-architecture example", () => {
-  it("builds the whole graph, runs the migration, and collects every plugin", async () => {
-    const built = await Layer.build(AppStarted);
-
-    expect(built.isOk()).toBe(true);
-    const ctx = built.unwrap();
+  it("collects every plugin from the built graph", async () => {
+    const ctx = (await Layer.build(AppStarted)).unwrap();
 
     // the multi-binding collection accumulated both sinks, in listed order
     expect(ctx.get(AuditSinks).map((s) => s.name)).toEqual(["console", "in-memory"]);
+  });
 
-    // the stub database returns no rows, so the use case surfaces the modeled domain error
-    const res = await ctx.get(GetOrder).execute("order-1");
-    expect(res.isErr()).toBe(true);
+  it("runs the use case, surfacing the modeled domain error for a missing order", async () => {
+    const ctx = (await Layer.build(AppStarted)).unwrap();
+
+    // the stub database returns no rows, so the use case surfaces OrderNotFound
+    expect((await ctx.get(GetOrder).execute("order-1")).unwrapErr()).toBeInstanceOf(OrderNotFound);
   });
 
   it("override swaps the repository with a fake — deep, through the use case", async () => {
