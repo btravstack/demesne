@@ -1,0 +1,5 @@
+/* demesne accent — violet.
+ * @btravstack/theme 1.4.0 derives every accent shade from this one token. */
+:root:root {
+  --accent: #B45CE0;
+}
