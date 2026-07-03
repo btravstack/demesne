@@ -277,7 +277,9 @@ error type appears in the wiring union that `match` must handle.
 > This whole example is a real program in
 > [`examples/clean-architecture`](./examples/clean-architecture) — one file per layer,
 > compiled by `tsc` against demesne's built types in CI. The snippets above can't drift
-> from working code.
+> from working code. For a realistic web service — a **Hono** REST API with a **zod**-parsed
+> environment, **Prisma**/Postgres behind a port, and `unthrown` `Result`s mapped to HTTP
+> status codes — see [`examples/hono-prisma-api`](./examples/hono-prisma-api).
 
 ## Design notes
 

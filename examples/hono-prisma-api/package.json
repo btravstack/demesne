@@ -1,0 +1,30 @@
+{
+  "name": "@demesne-examples/hono-prisma-api",
+  "private": true,
+  "description": "A Hono REST API wired with demesne: zod env, Prisma/Postgres, unthrown Results mapped to HTTP",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "test": "prisma generate && vitest run",
+    "typecheck": "prisma generate && tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "catalog:",
+    "@prisma/adapter-pg": "catalog:",
+    "@prisma/client": "catalog:",
+    "demesne": "workspace:*",
+    "hono": "catalog:",
+    "unthrown": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@demesne/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "prisma": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

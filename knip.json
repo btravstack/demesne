@@ -9,6 +9,10 @@
     "examples/*": {
       "project": ["src/**/*.ts"]
     },
+    "examples/hono-prisma-api": {
+      "project": ["src/**/*.ts", "!src/generated/**"],
+      "ignoreDependencies": ["@prisma/client"]
+    },
     "docs": {
       "entry": ["scripts/*.ts"],
       "project": ["scripts/**/*.ts"]

@@ -1,0 +1,31 @@
+// Infrastructure — the Prisma client as a demesne resource. `acquireRelease` connects on
+// build and registers `$disconnect` with the scope, so the connection is a tracked resource:
+// the graph carries `Scope` in its requirements and can only be run with `Layer.scoped`
+// (which closes the pool on shutdown). Prisma 7 uses a driver adapter (`@prisma/adapter-pg`)
+// over `pg`, and the connection URL is passed to the client here, not baked into the schema.
+
+import { PrismaPg } from "@prisma/adapter-pg";
+import { type Context, Layer, Tag } from "demesne";
+import { fromPromise, TaggedError } from "unthrown";
+
+import { AppConfig } from "../config/env.js";
+import { PrismaClient } from "../generated/prisma/client.ts";
+
+export class Database extends Tag("Database")<Database, PrismaClient>() {}
+
+export class ConnectionError extends TaggedError("ConnectionError")<{ cause: unknown }> {}
+
+// Needs `AppConfig` (for the URL); async + fallible (the connect may reject). `fromPromise`
+// qualifies the rejection into a modeled `ConnectionError`.
+export const DatabaseLive = Layer.acquireRelease(
+  Database,
+  (ctx: Context<AppConfig>) => {
+    const adapter = new PrismaPg({ connectionString: ctx.get(AppConfig).DATABASE_URL });
+    const client = new PrismaClient({ adapter });
+    return fromPromise(
+      client.$connect().then(() => client),
+      (cause) => new ConnectionError({ cause }),
+    );
+  },
+  (client) => client.$disconnect(), // released (LIFO) when the scope closes
+);

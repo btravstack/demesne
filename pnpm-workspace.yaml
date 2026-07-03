@@ -15,12 +15,17 @@ catalog:
   "@changesets/cli": 2.31.0
   "@commitlint/cli": 21.0.2
   "@commitlint/config-conventional": 21.0.2
+  "@hono/node-server": 2.0.6
+  "@prisma/adapter-pg": 7.8.0
+  "@prisma/client": 7.8.0
   "@types/node": 24.13.2
   "@vitest/coverage-v8": 4.1.8
+  hono: 4.12.27
   knip: 6.20.0
   lefthook: 2.1.9
   oxfmt: 0.56.0
   oxlint: 1.71.0
+  prisma: 7.8.0
   tsdown: 0.22.3
   tsx: 4.22.4
   turbo: 2.10.0
@@ -30,15 +35,23 @@ catalog:
   unthrown: 3.0.0
   vitepress: 1.6.4
   vitest: 4.1.8
+  zod: 4.4.3
 
 peerDependencyRules:
   ignoreMissing:
     # Optional analytics peer of VitePress's bundled Algolia DocSearch.
     - search-insights
+    # React peers of `@prisma/studio-core`, pulled in transitively by the `prisma`
+    # CLI (v7 bundles Prisma Studio). We never run `prisma studio`, so its GUI's
+    # React peers are irrelevant to the hono-prisma-api example.
+    - react
+    - react-dom
 
 allowBuilds:
+  "@prisma/engines": false
   esbuild: true
   lefthook: true
+  prisma: true
 
 # Supply-chain maturity delay: don't adopt a freshly published version until it
 # has been on the registry for 7 days (10080 minutes). Strict mode also validates
