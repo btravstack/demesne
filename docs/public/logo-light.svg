@@ -1,6 +1,1 @@
-<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="6" y="6" width="36" height="36" rx="9" stroke="#6C3786" stroke-width="3" />
-  <rect x="14" y="15" width="20" height="4" rx="2" fill="#6C3786" />
-  <rect x="14" y="22" width="20" height="4" rx="2" fill="#6C3786" opacity="0.55" />
-  <rect x="14" y="29" width="20" height="4" rx="2" fill="#6C3786" opacity="0.55" />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140" width="140" height="140" fill="none"><path d="M70,10 L114,24 V62 C114,94 94,114 70,128 C46,114 26,94 26,62 V24 Z" fill="rgba(62,30,50,0.04)" stroke="#3E1E32" stroke-width="5" stroke-linejoin="round"></path><g transform="translate(70,68) scale(0.52) translate(-50,-63)"><g transform="translate(50,34)"><g transform="rotate(-35)"><path d="M0,3 C-6,-7 -6,-18 0,-28 C6,-18 6,-7 0,3 Z" fill="#2C8B4E"></path></g><g transform="rotate(35)"><path d="M0,3 C-6,-7 -6,-18 0,-28 C6,-18 6,-7 0,3 Z" fill="#2C8B4E"></path></g><path d="M0,4 C-7,-8 -7,-20 0,-32 C7,-20 7,-8 0,4 Z" fill="#3DAE62"></path></g><path d="M50,32 C29,30 17,44 17,60 C17,79 37,99 50,107 Z" fill="#CE3D80"></path><path d="M50,32 C71,30 83,44 83,60 C83,79 63,99 50,107 Z" fill="#8E1A52"></path><path d="M31,48 C27,55 27.5,65 32,73" stroke="#EE9CC4" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.55"></path><path d="M46.5,104 C46.5,112 44,118 39,124 C47,120 52.5,112 53.5,104 Z" fill="#8E1A52"></path></g></svg>
