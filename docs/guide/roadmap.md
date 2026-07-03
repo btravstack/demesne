@@ -163,6 +163,11 @@ Notes:
   so the compiler makes you consume it with `scoped`. The hook is infallible, like
   `release`. (A service that both acquires and releases is just `acquireRelease`; `onStop`
   adds shutdown to a service built some other way.)
+- **Attach hooks to the assembled graph, or to a self-contained layer.** `onStart` /
+  `onStop` wrap a layer and build it eagerly — so, like any composite, they can't be a
+  direct `wire` member whose dependency another sibling provides (`wire` can't defer a
+  composite; see [Layers & Wiring](./layers-and-wiring#layer-wire-assemble-a-set-automatically)).
+  Wrap the `Layer.wire(...)` result, or a layer already satisfied with `provideTo`.
 
 ## Future
 
