@@ -44,20 +44,27 @@ export interface TagClass<Self, Id extends string, Service> extends Tag<Self, Se
 
 // Guard against the one runtime-unsound corner of the nominal-tag scheme: two DISTINCT tag
 // classes that share an `Id` are distinct *types* but the same runtime map key (`tag.key`),
-// so in a Context one silently reads the other's service. Ids must be globally unique. We
-// warn (not throw — a latent duplicate shouldn't crash) the first time an id repeats.
+// so in a Context one silently reads the other's service. Ids must be globally unique.
+//
+// The guard is **development-only** — it is a best-effort dev aid, not part of the runtime
+// contract: bundlers replace `process.env.NODE_ENV` so the whole block (and the module-level
+// `Set`) drop out of a production build, keeping the library side-effect-free at runtime. It
+// warns (never throws — a latent duplicate shouldn't crash) the first time an id repeats.
+const isDev = typeof process === "undefined" || process.env["NODE_ENV"] !== "production";
 const seenTagIds = new Set<string>();
 
 export const Tag =
   <const Id extends string>(id: Id) =>
   <Self, Service>(): TagClass<Self, Id, Service> => {
-    if (seenTagIds.has(id)) {
-      console.warn(
-        `demesne: duplicate Tag id ${JSON.stringify(id)} — tag ids must be unique, or two ` +
-          `tags collide in the Context and one reads the other's service.`,
-      );
-    } else {
-      seenTagIds.add(id);
+    if (isDev) {
+      if (seenTagIds.has(id)) {
+        console.warn(
+          `demesne: duplicate Tag id ${JSON.stringify(id)} — tag ids must be unique, or two ` +
+            `tags collide in the Context and one reads the other's service.`,
+        );
+      } else {
+        seenTagIds.add(id);
+      }
     }
     const cls = class {
       static readonly [TagTypeId] = TagTypeId;
@@ -210,12 +217,15 @@ const value = <Self, Service>(
   build: () => Ok(unsafeAdd(emptyAny(), tag.key, service)).toAsync(),
 });
 
-// A layer built synchronously and infallibly from the context.
+// A layer built synchronously and infallibly from the context. `f` runs inside `.map`, so a
+// throw in its body becomes a `Defect` (handled at the edge) rather than escaping the
+// AsyncResult — the same discipline as `make`. Infallible means `E = never`; a `Defect` is
+// orthogonal (the unmodeled-throw escape hatch), so the type is unchanged.
 const factory = <Self, Service, Needs = never>(
   tag: Tag<Self, Service>,
   f: (ctx: Context<Needs>) => Service,
 ): Layer<Self, never, Needs> => ({
-  build: (ctx) => Ok(unsafeAdd(emptyAny(), tag.key, f(ctx))).toAsync(),
+  build: (ctx) => Ok<void>(undefined).toAsync().map(() => unsafeAdd(emptyAny(), tag.key, f(ctx))),
 });
 
 // A layer whose construction may FAIL and/or be ASYNC: the factory returns a
@@ -302,8 +312,11 @@ const member = <Self, Item, Needs = never>(
   collectionTag: Tag<Self, readonly Item[]>,
   f: (ctx: Context<Needs>) => Item,
 ): Layer<Self, never, Needs> => ({
+  // `f` runs inside `.map` so a throw becomes a `Defect`, not an escaped exception (like `factory`).
   build: (ctx) =>
-    Ok(unsafeAdd(emptyAny(), collectionTag.key, [f(ctx)] as readonly Item[])).toAsync(),
+    Ok<void>(undefined)
+      .toAsync()
+      .map(() => unsafeAdd(emptyAny(), collectionTag.key, [f(ctx)] as readonly Item[])),
 });
 
 // Distribute over a union of layers to collect each channel as a union. Naked

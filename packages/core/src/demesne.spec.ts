@@ -218,6 +218,28 @@ describe("parallel merge", () => {
 
     expect(result.isDefect()).toBe(true);
   });
+
+  it("a throw in a `factory` body becomes a Defect (not an escaped exception)", async () => {
+    const Boom = Layer.factory(Marker, (): ServiceOf<typeof Marker> => {
+      throw new Error("factory boom");
+    });
+
+    // Must RESOLVE to a Defect — `Layer.build` must not reject/throw.
+    const result = await Layer.build(Boom);
+
+    expect(result.isDefect()).toBe(true);
+  });
+
+  it("a throw in a `member` body becomes a Defect", async () => {
+    class Plugins extends Tag("DefectPlugins")<Plugins, readonly { readonly n: number }[]>() {}
+    const Boom = Layer.member(Plugins, (): { readonly n: number } => {
+      throw new Error("member boom");
+    });
+
+    const result = await Layer.build(Layer.collect(Plugins, [Boom]));
+
+    expect(result.isDefect()).toBe(true);
+  });
 });
 
 describe("internals: defensive runtime guards", () => {

@@ -59,8 +59,10 @@ is legal without the class referencing itself as a base type. The literal `Id` k
 instance types nominal. The one runtime-unsound corner is **duplicate ids**: two distinct
 tag classes sharing an `Id` are distinct types but the same runtime map key, so one silently
 reads the other's service — `Tag` therefore **warns** (once per id, never throws) when an id
-repeats. Ids must be globally unique. _(Guarded by: reading an absent tag is a compile error;
-the spec asserts the duplicate-id warning.)_
+repeats. The warn is a **development-only** best-effort aid (gated on `process.env.NODE_ENV`,
+so bundlers strip it and the module-level `Set` from production — the library stays
+side-effect-free at runtime). Ids must be globally unique. _(Guarded by: reading an absent tag
+is a compile error; the spec asserts the duplicate-id warning.)_
 
 **Definition convention — inline the shape; the class IS the tag.** Prefer a single
 declaration with the service shape inlined over a separate `interface` + short tag
@@ -150,6 +152,14 @@ Every `build` receives an internal `BuildState` carrying a **memo map** and a
   is reused (so concurrent `merge` branches don't double-build). The memo map is
   per-`build`/`scoped` call — separate builds reconstruct. _(Guarded by the spec: a
   layer shared across two branches constructs once; separate builds reconstruct.)_
+  - **Footgun — the key is the reference, and `ctx` is ignored on a hit.** Two consequences
+    when hand-threading with `provideTo`/`merge`: (a) to share a singleton you must thread the
+    **same reference** — a sub-layer written inline in two places is two distinct objects, so
+    it builds **twice** (e.g. two DB pools) with no warning; bind it to a `const` and reuse
+    that. (b) Feeding **one** reference two **different** dependency sets (two `provideTo`
+    branches under a `merge`) builds it once against whichever branch wins the parallel race;
+    the other consumer silently reads a service built with the wrong deps. A layer reference
+    is a singleton per build — never give one reference two different dependency sets.
 - **Ordered teardown.** `acquireRelease(tag, acquire, release)` registers `release`
   with the scope. `scoped(layer, use)` builds, runs `use`, then closes the scope —
   running finalizers in **reverse acquisition order (LIFO)**, whether `use` succeeded,

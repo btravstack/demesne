@@ -106,10 +106,14 @@ Each `provideTo` **discharges** the requirement it feeds (`Needs` shrinks by
 `Needs` is `never` and `Layer.build` compiles. A dependency you forgot to thread stays in
 the type — `build` names it as a compile error.
 
-::: tip Shared layers build once
+::: tip Shared layers build once — but the key is the _reference_
 List a layer in more than one branch (here `DatabaseWired` feeds `RepoWired` **and** is
 merged for its own `Database` service) and it still constructs exactly once per build — the
-build memoizes by reference. So hand-composition never double-builds a shared dependency.
+build memoizes **by reference**. Two things follow: bind a shared layer to a `const` and reuse
+_that_ — the same layer written inline in two places is two distinct objects, so it builds
+**twice** (two DB pools, silently). And a layer reference is a singleton per build: don't feed
+one reference two different dependency sets, or it's built once against whichever wins the
+race and the other consumer reads the wrong one.
 :::
 
 ### Testing: parameterize the graph by its dependencies
