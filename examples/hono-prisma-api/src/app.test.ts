@@ -13,7 +13,7 @@ import { Err, Ok, type Result } from "unthrown";
 
 import { GetTodo } from "./application/get-todo.js";
 import { AuditSinks } from "./application/plugins.js";
-import { Logger, TodoRepository } from "./application/ports.js";
+import { TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
 import { buildRoutes } from "./http/routes.js";
@@ -47,7 +47,7 @@ const makeFakeRepo = (): ServiceOf<TodoRepository> => {
   };
 };
 
-// The same app the server builds, with the fake repository — a fresh WiredLayer each call.
+// The same app the server builds, with the fake repository — a fresh layer each call.
 // The fake needs nothing, so this graph has no `Scope` and builds without a database.
 const fakeApp = () => bootstrap(Layer.value(TodoRepository, makeFakeRepo()));
 
@@ -131,24 +131,11 @@ describe("todos api (HTTP)", () => {
   });
 });
 
-describe("wired combinators on the same app", () => {
+describe("combinators on the same app", () => {
   it("collects both audit sinks (member + collect)", async () => {
     const ctx = (await Layer.build(fakeApp())).unwrap();
 
     expect(ctx.get(AuditSinks).map((sink) => sink.name)).toEqual(["console", "in-memory"]);
-  });
-
-  it("override swaps the logger deeply — the use case logs to it", async () => {
-    const logs: string[] = [];
-    const SpyLogger = Layer.value(Logger, { info: (msg) => void logs.push(msg) });
-
-    // fakeApp() is a `Layer.wire` result, so override can re-assemble it with the spy —
-    // deeply: every consumer (the GetTodo interactor, the audit sink) that captured Logger
-    // at construction now sees the spy.
-    const ctx = (await Layer.build(Layer.override(fakeApp(), [SpyLogger]))).unwrap();
-    await ctx.get(GetTodo).execute("seed-1");
-
-    expect(logs).toEqual(["getting todo seed-1"]);
   });
 
   it("forkScope layers a per-request scope on the built app", async () => {

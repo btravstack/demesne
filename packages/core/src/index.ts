@@ -114,23 +114,6 @@ const unsafeAdd = (ctx: Context<any>, key: string, service: unknown): Context<an
 const mergeContext = (a: Context<any>, b: Context<any>): Context<any> =>
   makeContext(new Map([...a.unsafeMap, ...b.unsafeMap]));
 
-// Thrown by the probe context `wire` builds against while it discovers a build order:
-// a layer that reads a not-yet-constructed dependency signals "not ready" (so `wire`
-// defers it to a later round) rather than failing. Distinct from a genuine bug.
-class MissingDependency extends Error {}
-
-const makeProbeContext = (map: ReadonlyMap<string, unknown>): Context<any> => ({
-  [ContextTypeId]: ContextTypeId,
-  unsafeMap: map,
-  _R: noopR,
-  get(tag) {
-    if (!map.has(tag.key)) {
-      throw new MissingDependency(tag.key);
-    }
-    return map.get(tag.key) as never;
-  },
-});
-
 // ---------------------------------------------------------------------------
 // Layer<Provides, E, Needs> — a recipe that builds the services in `Provides`,
 // possibly requiring `Needs` and possibly failing with `E`. Both channels
@@ -194,16 +177,6 @@ const buildMemo = <P, E, N>(
   if (cached !== undefined) return cached as AsyncResult<Context<P>, E>;
   const result = layer.build(ctx, state);
   state.memoMap.set(layer, result);
-  // Self-heal for `wire` / `override` resolution: a `MissingDependency` Defect means the
-  // layer was built in a deferral round before its deps existed. Evict the cached failure
-  // so a later round rebuilds it against a fuller context — otherwise the poisoned entry
-  // would make the layer defer forever and `wire` would report a false "dependency cycle".
-  // (Outside wire/override no `MissingDependency` ever occurs, so this is inert there.)
-  result.tapDefect((cause) => {
-    if (cause instanceof MissingDependency && state.memoMap.get(layer) === result) {
-      state.memoMap.delete(layer);
-    }
-  });
   return result;
 };
 
@@ -368,156 +341,6 @@ const provideTo = <P, E, N, P2, E2, N2>(
     ),
 });
 
-// Resolve a set of layers by repeatedly building those whose dependencies are already
-// available (a layer that reads a missing service is deferred), until every layer has
-// built — then merge all their provisions into one context. A layer's dependencies may
-// be satisfied by ANY other layer in the set, so order doesn't matter; a first Err
-// short-circuits, and no forward progress means a dependency cycle.
-const resolveWire = async (
-  layers: readonly Layer<any, any, any>[],
-  outerCtx: Context<any>,
-  state: BuildState,
-  // Keys whose value is fixed for this resolution: a layer that provides one of
-  // them still builds, but its output for that key is discarded (the seeded value
-  // wins). This is how `override` makes a patch win over a base provider deeply —
-  // every consumer reads the patched value, yet the base provider's own body still
-  // runs and registers its finalizers.
-  protectedKeys: ReadonlySet<string> = new Set(),
-): Promise<Result<Context<any>, any>> => {
-  const acc = new Map(outerCtx.unsafeMap);
-  const probe = makeProbeContext(acc);
-  let remaining = layers;
-
-  while (remaining.length > 0) {
-    const outcomes = await Promise.all(
-      remaining.map(async (layer) => {
-        try {
-          const result = await layer.build(probe, state);
-          if (result.isOk()) return { layer, ctx: result.unwrap() };
-          // The `MissingDependency` message IS the tag key the layer is waiting on.
-          if (result.isDefect() && result.cause instanceof MissingDependency) {
-            return { layer, waitingFor: result.cause.message };
-          }
-          return { fail: result };
-        } catch (thrown) {
-          if (thrown instanceof MissingDependency) return { layer, waitingFor: thrown.message };
-          throw thrown;
-        }
-      }),
-    );
-
-    const pending: { layer: Layer<any, any, any>; waitingFor: string }[] = [];
-    let progressed = false;
-    for (const outcome of outcomes) {
-      if ("fail" in outcome) return outcome.fail;
-      if ("waitingFor" in outcome) {
-        pending.push({ layer: outcome.layer, waitingFor: outcome.waitingFor });
-      } else {
-        for (const [key, service] of outcome.ctx.unsafeMap) {
-          if (!protectedKeys.has(key)) acc.set(key, service);
-        }
-        progressed = true;
-      }
-    }
-    if (!progressed) {
-      // Every remaining layer is stuck waiting on a service that never becomes available —
-      // a genuine dependency cycle (the type system can't catch cycles). Name the services
-      // involved so it's diagnosable rather than a bare "cycle".
-      const services = [...new Set(pending.map((p) => p.waitingFor))].sort();
-      throw new Error(
-        `demesne: Layer.wire could not resolve ${pending.length} layer(s) — a dependency ` +
-          `cycle among the services [${services.join(", ")}] (each is waited on but never ` +
-          `becomes available).`,
-      );
-    }
-    remaining = pending.map((p) => p.layer);
-  }
-
-  return Ok(makeContext(acc));
-};
-
-// A `wire`-assembled layer, branded with the source layers it was assembled from. The
-// brand is what lets `override` re-assemble the graph with patched providers deeply —
-// a plain (opaque) `Layer` has already consumed its dependencies and can't be patched.
-const WireSourceId = Symbol.for("demesne/wireSource");
-export interface WiredLayer<Provides, E = never, Needs = never> extends Layer<Provides, E, Needs> {
-  readonly [WireSourceId]: readonly Layer<any, any, any>[];
-}
-
-// Automatically assemble a set of layers: each layer's requirements may be satisfied by
-// any other layer in the set, so you list them in any order instead of hand-threading
-// `provideTo` / `merge`. Provides the UNION of every service; errors union; the only
-// remaining `Needs` are those no layer in the set provides — so a self-contained set is
-// `Needs = never` and a missing dependency stays in the type (and `build` rejects it).
-const wire = <Ls extends readonly [Layer<any, any, any>, ...Layer<any, any, any>[]]>(
-  ...layers: Ls
-): WiredLayer<
-  ProvidesOf<Ls[number]>,
-  ErrorOf<Ls[number]>,
-  Exclude<NeedsOf<Ls[number]>, ProvidesOf<Ls[number]>>
-> => ({
-  [WireSourceId]: layers as readonly Layer<any, any, any>[],
-  build: (ctx, state) =>
-    fromSafePromise(
-      resolveWire(layers as readonly Layer<any, any, any>[], ctx as Context<any>, state),
-    ).flatMap((result) => result.toAsync()),
-});
-
-// Resolve a `wire`-assembled base with a set of patch layers whose providers WIN. The
-// patches build first (against the outer context), and every key they introduce or
-// change is protected while the base's source layers re-assemble around them — so a
-// consumer deep in the base reads the patched service, not the original. The base's own
-// provider for a patched tag still runs (its finalizers register), but its value for
-// that tag is discarded. Patches may only depend on services available OUTSIDE the base.
-const resolveOverride = async (
-  baseLayers: readonly Layer<any, any, any>[],
-  patches: readonly Layer<any, any, any>[],
-  outerCtx: Context<any>,
-  state: BuildState,
-): Promise<Result<Context<any>, any>> => {
-  const patchResult = await resolveWire(patches, outerCtx, state);
-  if (patchResult.isErr()) return patchResult;
-  const patchCtx = patchResult.unwrap();
-
-  const protectedKeys = new Set<string>();
-  for (const [key, service] of patchCtx.unsafeMap) {
-    if (!outerCtx.unsafeMap.has(key) || outerCtx.unsafeMap.get(key) !== service) {
-      protectedKeys.add(key);
-    }
-  }
-
-  return resolveWire(baseLayers, patchCtx, state, protectedKeys);
-};
-
-// Replace specific tags' providers deep inside an assembled (`Layer.wire`) graph while
-// keeping the rest — the testing seam (swap a real adapter for a fake without hand-
-// rewiring). `base` must be a `wire` result (only that carries the source layers this
-// re-assembles); a plain layer is a compile error. Provides `P | Ps` (patches may add or
-// replace tags), errors union, and requirements are `Exclude<N | Ns, Ps>` — a patch that
-// provides a tag the base needed externally discharges it. `override` is DEEP: every
-// consumer inside the base reads the patched service, not the original.
-const override = <
-  B extends WiredLayer<any, any, any>,
-  Ps extends readonly [Layer<any, any, any>, ...Layer<any, any, any>[]],
->(
-  base: B,
-  patches: Ps,
-): Layer<
-  ProvidesOf<B> | ProvidesOf<Ps[number]>,
-  ErrorOf<B> | ErrorOf<Ps[number]>,
-  Exclude<NeedsOf<B> | NeedsOf<Ps[number]>, ProvidesOf<Ps[number]>>
-> => ({
-  build: (ctx, state) =>
-    fromSafePromise(
-      resolveOverride(
-        base[WireSourceId],
-        patches as readonly Layer<any, any, any>[],
-        ctx as Context<any>,
-        state,
-      ),
-    ).flatMap((result) => result.toAsync()),
-});
-
 // Accumulate several contributions to one COLLECTION tag into a single `readonly Item[]`
 // service — the multi-binding / plugin-collection pattern, with no runtime registry. Each
 // member provides the collection tag with an array (see `member`, or a `make`/`factory`
@@ -617,8 +440,9 @@ const forkScope = <Parent, ReqP, E, A, E2>(
 export const Context = { empty };
 
 // Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member`),
-// combinators (`merge` / `provideTo` / `wire` / `override` / `collect` / `onStart` /
-// `onStop`), and the terminals `build` / `scoped` / `forkScope`.
+// combinators (`merge` / `provideTo` / `collect` / `onStart` / `onStop`), and the terminals
+// `build` / `scoped` / `forkScope`. Assembly is single-pass and fully type-checked: you
+// compose a graph by hand with `provideTo` / `merge` (there is no runtime auto-wiring).
 export const Layer = {
   value,
   factory,
@@ -627,8 +451,6 @@ export const Layer = {
   member,
   merge,
   provideTo,
-  wire,
-  override,
   collect,
   onStart,
   onStop,

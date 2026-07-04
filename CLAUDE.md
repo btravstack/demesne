@@ -132,8 +132,10 @@ short-circuit, throw → Defect, and an N-way merge.)_
 
 The public value surface is grouped into companion objects so a reader can tell a
 Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,merge,
-provideTo,wire,override,collect,onStart,onStop,build,scoped,forkScope}` and
-`Context.{empty}`. `Context` and `Layer` are each **both a
+provideTo,collect,onStart,onStop,build,scoped,forkScope}` and
+`Context.{empty}`. Assembly is single-pass and fully type-checked — graphs are composed by
+hand with `provideTo` / `merge`; there is **no auto-wiring** (see the "no `wire`" note in
+Accepted constraints). `Context` and `Layer` are each **both a
 type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
 `Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
 not re-flatten these into top-level function exports.
@@ -148,16 +150,6 @@ Every `build` receives an internal `BuildState` carrying a **memo map** and a
   is reused (so concurrent `merge` branches don't double-build). The memo map is
   per-`build`/`scoped` call — separate builds reconstruct. _(Guarded by the spec: a
   layer shared across two branches constructs once; separate builds reconstruct.)_
-- **Self-heal for `wire` deferral.** `buildMemo` **evicts** a cached result that resolves
-  to a `MissingDependency` Defect (`result.tapDefect(...)`). This is load-bearing: `wire`
-  discovers order by re-running `build` each round, and a `make`/`acquireRelease` nested
-  through a `buildMemo`-combinator (`onStart`/`onStop`/`collect`/`merge`/`provideTo`) turns
-  a not-yet-ready read into an **async** Defect that `buildMemo` caches _before_ it rejects;
-  without eviction the poisoned entry makes the layer defer forever and `wire` reports a
-  **false "dependency cycle"**. Do **not** remove the eviction — it is why a composite may
-  be a direct `wire` member. Outside wire/override no `MissingDependency` ever occurs, so it
-  is inert there. _(Guarded by the spec: `onStart`-over-`make` and `collect` whose member
-  needs a wire sibling both resolve.)_
 - **Ordered teardown.** `acquireRelease(tag, acquire, release)` registers `release`
   with the scope. `scoped(layer, use)` builds, runs `use`, then closes the scope —
   running finalizers in **reverse acquisition order (LIFO)**, whether `use` succeeded,
@@ -195,34 +187,7 @@ releases request resources LIFO with the parent untouched; fresh instances per f
 release-on-`use`-failure. And the type-level tests: parent inferred; a request layer
 needing a non-parent service is rejected.)_
 
-### 13. `override` re-assembles a wired graph with patched providers, deeply
-
-`override(base, patches)` replaces specific tags' providers inside an assembled graph. It
-is **deep by re-assembly**, not a post-build overwrite: a consumer that captured a
-dependency at construction (e.g. a use case doing `ctx.get(Repo)` in its factory) must see
-the patch, so a shallow swap of the final context is wrong. `base` is therefore constrained
-to a **`WiredLayer`** — the branded result of `Layer.wire`, which carries its source layers
-(`WireSourceId`, an internal symbol) — because only the source layers can be re-resolved;
-a plain (opaque) `Layer` has already consumed its deps and is a **compile error**. At
-runtime: build the patches first (against the outer context), collect the keys they
-introduce or change into a **protected set**, then re-run `resolveWire` over the base's
-source layers with those keys seeded and locked — every base provider still runs (its
-finalizers register) but its value for a protected key is discarded, so consumers read the
-patched value. **Consequence (do not misuse):** because the base provider's body still runs,
-`override` **cannot escape a _failing_ or unavailable real provider** — if the base provider
-for a patched tag errors (e.g. a DB adapter that can't connect), the whole `override` fails
-even though the patch fully supplies the tag. To test against a broken/absent dependency,
-**assemble a fresh graph with the fake** (parameterize the graph by the provider — the
-`bootstrap(repository)` pattern), not `override`. Patches may depend only on services
-**outside** the base (not double-building the base). Provides `P | Ps`, errors union, `Needs = Exclude<N | Ns, Ps>`. **Infer the base
-as a whole `B extends WiredLayer<any,any,any>` and pull channels with `ProvidesOf`/`ErrorOf`/
-`NeedsOf`** — do **not** infer `N` from a `WiredLayer<P,E,N>` parameter directly (it sits in
-a contravariant position and degrades to `any`). _(Guarded by the spec: deep replace,
-intermediate propagation, add-a-new-tag, base resource still torn down, patch-error
-short-circuit, wins over an ambient outer value. And the type-level tests: provides/errors/
-needs computed; a new tag joins provides; a non-wired base is rejected.)_
-
-### 14. Multi-bindings: `member` contributes, `collect` concatenates
+### 13. Multi-bindings: `member` contributes, `collect` concatenates
 
 A **collection tag** is a tag whose service is a `readonly Item[]`. `member(collectionTag, f)`
 is a single contribution — it mirrors `factory` (sync, infallible) and provides the tag with
@@ -237,12 +202,12 @@ error); errors and requirements union across members via `ErrorOf`/`NeedsOf`, an
 list is an empty collection (`Layer<Self, never, never>`). collect must **not** use
 `mergeContext` (same-key provisions would overwrite, not accumulate) — it reads and concats
 each member's array by hand. No runtime registry; the port list stays declared at boundaries.
-_(Guarded by the spec: listed-order concat, per-member needs threaded through `wire`, mixed
-member + `make` flattening, empty collection, first-`Err` short-circuit. And the type-level
-tests: member Needs inferred, collect unions error/needs, empty collection type, foreign tag
-rejected.)_
+_(Guarded by the spec: listed-order concat, per-member needs discharged with `provideTo`,
+mixed member + `make` flattening, empty collection, first-`Err` short-circuit, and a member
+whose context lacks the key. And the type-level tests: member Needs inferred, collect unions
+error/needs, empty collection type, foreign tag rejected.)_
 
-### 15. Lifecycle hooks: `onStart` runs post-build (FIFO), `onStop` tears down (LIFO)
+### 14. Lifecycle hooks: `onStart` runs post-build (FIFO), `onStop` tears down (LIFO)
 
 `onStart(layer, hook)` and `onStop(layer, hook)` attach lifecycle steps **distinct from
 construction**, threaded through the same `BuildState`. `onStart` pushes to `startHooks`; the
@@ -256,10 +221,10 @@ relative order. Don't rely on cross-branch start-hook ordering. A start hook is 
 short-circuits startup before `use` (the scope still closes). `onStop` pushes a **finalizer**
 (same list as `acquireRelease`, run **LIFO** on scope close) and therefore adds **`Scope`** to
 `Needs` — the graph must be consumed with `scoped`; its hook is **infallible**, mirroring
-`release`. Both are **combinators** (decorate an existing layer), so — like `override` — they
-must **infer the whole layer as `L extends Layer<any,any,any>`** and pull channels with
-`ProvidesOf`/`ErrorOf`/`NeedsOf`; inferring `N` from a `Layer<P,E,N>` parameter directly
-degrades to `any` (contravariant position). Do **not** run start hooks eagerly at
+`release`. Both are **combinators** (decorate an existing layer), so they must **infer the
+whole layer as `L extends Layer<any,any,any>`** and pull channels with `ProvidesOf`/`ErrorOf`/
+`NeedsOf`; inferring `N` from a `Layer<P,E,N>` parameter directly degrades to `any`
+(contravariant position). Do **not** run start hooks eagerly at
 construction (they must see the fully-built graph), and do **not** make `onStop` fallible or
 scope-free (teardown is best-effort and needs the `Scope` discipline). `onStop` is **not**
 redundant with `acquireRelease`: the latter acquires _and_ releases a resource; `onStop` adds
@@ -268,24 +233,28 @@ before `use`, start under plain `build`, failed-hook abort with error union, sco
 failed-hook, LIFO stop order. And the type-level tests: `onStart` unions the hook error and
 keeps `Needs`; `onStop` adds `Scope` so `build` rejects it and `scoped` accepts it.)_
 
-## Accepted constraints (from the expert audit)
+## Accepted constraints (design choices)
 
-Deliberate design choices / known limitations — documented so they aren't rediscovered as
-bugs. The one high-severity finding (`wire` memo poisoning) was **fixed** (see invariant #10);
-the rest are accepted:
+Deliberate design choices, documented so they aren't rediscovered as bugs:
 
+- **No auto-wiring (`wire` was removed).** demesne does **not** resolve build order at
+  runtime. Automatic assembly is fundamentally at odds with the model: with eager,
+  synchronous `ctx.get` and erased types, the only way to discover order is to run factories
+  and retry the ones that read a not-yet-ready dep — which re-runs side effects (and leaks
+  resources whose `acquire` opens before a deferred read), and turns cycles into runtime
+  Defects rather than compile errors. So there is exactly one way to assemble: hand-thread
+  with `provideTo` / `merge`, which is single-pass, deterministic, and fully type-checked
+  (a missing dependency is a compile error). This is the sharp edge of the thesis: everything
+  is discharged before you run. (`override` rode on `wire` and was removed with it.)
 - **Custom combinators must infer the whole layer.** A user-written combinator that takes
-  `Layer<P, E, N>` and infers `N` gets `any` — `Needs` is contravariant and degrades. Every
-  built-in decorator (`override`, `onStart`, `onStop`) instead infers `L extends
-Layer<any,any,any>` and pulls channels via `ProvidesOf` / `ErrorOf` / `NeedsOf`. Anyone
-  extending demesne must do the same.
-- **`wire` re-runs deferred builds; keep factories idempotent** (see invariant #10 / roadmap).
-  A factory / `acquire` passed (even transitively) to `wire` must read its deps **before** any
-  side effect, or the effect repeats across deferral rounds (and an `acquire` that opens a
-  resource before a deferred read leaks it).
-- **`override` runs the base provider** (see invariant #13). It cannot swap out a _failing_
-  provider; test against a broken/absent dependency with a `bootstrap(repository)`-style
-  parameterized graph, not `override`.
+  `Layer<P, E, N>` and infers `N` gets `any` — `Needs` is contravariant and degrades. The
+  built-in decorators (`onStart`, `onStop`) infer `L extends Layer<any,any,any>` and pull
+  channels via `ProvidesOf` / `ErrorOf` / `NeedsOf`. Anyone extending demesne must do the same.
+- **The test seam is parameterization, not `override`.** To swap a real adapter for a fake,
+  make the volatile dependency a parameter of the composition (a `bootstrap(repository)`
+  function threaded with `provideTo` / `merge`); the server passes the real adapter, a test
+  passes an in-memory fake. The swap is deep (every consumer that captured the port sees the
+  fake) and fully type-checked.
 - **No manual `Scope` handle.** A scope's lifetime IS the `use` callback of `scoped` /
   `forkScope`; there is no "open, hold, close later" handle. A long-lived app keeps the `use`
   promise open until a shutdown signal (see the example's `server.ts`), then teardown runs.
@@ -297,27 +266,18 @@ Layer<any,any,any>` and pulls channels via `ProvidesOf` / `ErrorOf` / `NeedsOf`.
 
 ## Roadmap — ideas from the wider DI ecosystem
 
-The wiring core is complete. Five roadmap items are **now implemented**: `Layer.wire`
-(automatic assembly) provides the union of every service, unions errors, and leaves
-`Needs = Exclude<allNeeds, allProvides>`, resolving order in rounds at runtime (a layer
-reading a not-yet-built dep is deferred; an unresolvable set is a runtime `Defect` naming
-the cyclic services) — do **not** try to make it topologically sort by types (they're
-erased). A composite (`onStart`/`collect`/`provideTo`/…) **may** be a direct `wire` member
-(the memo self-heals — see invariant #10), but note the **idempotency constraint**: `wire`
-re-runs a deferred layer's `build` each round, so any factory/`acquire` passed (even
-transitively) to `wire` must be side-effect-idempotent and **read all its deps before any
-effect** — otherwise the effect repeats, and an `acquire` that opens a resource before
-reading a deferred dep **leaks** it (opened before the deferring read registers the
-finalizer). Also do **not** memoize _genuine_ failures;
-`Layer.forkScope` (request / child scopes, see invariant #12); `Layer.override` (the
-test override combinator, see invariant #13); `Layer.member` / `Layer.collect`
-(multi-bindings, see invariant #14); and `Layer.onStart` / `Layer.onStop` (lifecycle
-hooks, see invariant #15). Remaining future work, borrowed selectively from mature DI
-systems **without** violating the thesis:
+The wiring core is complete. Three roadmap items are **now implemented**: `Layer.forkScope`
+(request / child scopes, see invariant #12); `Layer.member` / `Layer.collect` (multi-bindings,
+see invariant #13); and `Layer.onStart` / `Layer.onStop` (lifecycle hooks, see invariant #14).
+`Layer.wire` (automatic assembly) and `Layer.override` (deep test override) were implemented
+and then **removed** — they were the only parts that resolved at runtime, which is inherently
+at odds with the "everything discharged before you run" thesis (see Accepted constraints).
+Remaining future work, borrowed selectively from mature DI systems **without** violating the
+thesis:
 
-1. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid. The only
-   remaining roadmap item; a read-only diagnostic derived from the `wire` resolution
-   rounds (types are erased, so a truthful graph comes from runtime, not `Needs`).
+1. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid. A read-only
+   diagnostic; since assembly is hand-threaded `provideTo` / `merge`, a truthful graph would
+   walk the composed `Layer` structure at runtime (types are erased).
 
 Already solved elegantly, document it as the answer: **assisted injection**
 (injected deps + call-time args) is the constructor-injected use-case pattern
@@ -325,9 +285,10 @@ Already solved elegantly, document it as the answer: **assisted injection**
 
 **Do NOT adopt** (they break the thesis): reflection / decorator auto-wiring (trades
 compile-time safety for runtime), a monad / effect runtime (error handling stays with
-`unthrown`), codegen (types already give compile-time safety), or inferring `Needs` from
-usage (requirements are declared at boundaries — `Layer.wire` gives assembly ergonomics
-without giving that up). See `docs/guide/comparison.md` for the full landscape.
+`unthrown`), codegen (types already give compile-time safety), inferring `Needs` from usage
+(requirements are declared at boundaries), or **runtime auto-assembly** (this is exactly what
+`wire` did and why it was cut — order resolution belongs to the human composing `provideTo` /
+`merge`, checked by the compiler). See `docs/guide/comparison.md` for the full landscape.
 
 ## Toolchain (mirrors `unthrown`)
 

@@ -7,9 +7,9 @@
 // guards the cases that must NOT compile. The blocks below prove the guarantees the
 // core was designed for: absent reads fail, un-wired requirements block `build`, the
 // error channel is the real union, `Context` is contravariant, scopes are enforced,
-// and the combinators (`wire` / `override` / `collect`) compute every channel exactly.
+// and the combinators (`merge` / `collect` / lifecycle hooks) compute every channel exactly.
 
-import { type Context, Layer, type Scope, type ServiceOf, Tag, type WiredLayer } from "./index.js";
+import { type Context, Layer, type Scope, type ServiceOf, Tag } from "./index.js";
 import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
 
 // --- assertion helpers -------------------------------------------------------
@@ -124,38 +124,7 @@ declare const unwiredResource: Layer<ServiceA, never, ServiceB>;
 // @ts-expect-error - scoped still requires real services (ServiceB) to be wired first.
 Layer.scoped(unwiredResource, (): Result<number, never> => Ok(1));
 
-// --- 6. Layer.wire: automatic assembly ---------------------------------------
-
-const wireA = Layer.make(ServiceA, (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }));
-const wireB = Layer.make(
-  ServiceB,
-  (ctx: Context<ServiceA>): Result<{ readonly b: number }, EB> =>
-    Ok({ b: ctx.get(ServiceA).a.length }),
-);
-
-// wire unions Provides and Error, and computes Needs = all needs minus all provides.
-// Listed in any order; wireB's need (ServiceA) is provided by wireA, so Needs = never.
-const wiredAB = Layer.wire(wireB, wireA);
-type _wiredAB = Expect<Equal<typeof wiredAB, WiredLayer<ServiceA | ServiceB, EA | EB, never>>>;
-
-// Self-contained → build accepts it, and every service is provided.
-const wiredABResult = Layer.build(wiredAB);
-type _wiredABResult = Expect<
-  Equal<typeof wiredABResult, AsyncResult<Context<ServiceA | ServiceB>, EA | EB>>
->;
-
-// A need that no layer in the set provides stays in Needs, so `build` rejects it.
-const wireNeedsC = Layer.make(
-  ServiceA,
-  (ctx: Context<ServiceC>): Result<{ readonly a: string }, EA> =>
-    Ok({ a: String(ctx.get(ServiceC).c) }),
-);
-const wirePartial = Layer.wire(wireNeedsC);
-type _wirePartial = Expect<Equal<typeof wirePartial, WiredLayer<ServiceA, EA, ServiceC>>>;
-// @ts-expect-error - ServiceC is still unmet after wire; build requires Needs = never.
-Layer.build(wirePartial);
-
-// --- 7. Layer.forkScope: request / child scopes ------------------------------
+// --- 6. Layer.forkScope: request / child scopes ------------------------------
 
 declare const parentCtx: Context<ServiceA>;
 const reqLayer = Layer.factory(ServiceB, (ctx: Context<ServiceA>) => ({
@@ -177,32 +146,7 @@ const reqNeedsC = Layer.factory(ServiceB, (ctx: Context<ServiceC>) => ({
 // @ts-expect-error - ServiceC is not provided by the parent Context<ServiceA>.
 Layer.forkScope(parentCtx, reqNeedsC, (): Result<number, never> => Ok(1));
 
-// --- 8. Layer.override: swap providers in an assembled (wired) graph ----------
-
-const wiredForOverride = Layer.wire(
-  Layer.factory(ServiceA, () => ({ a: "x" })),
-  Layer.factory(ServiceB, (ctx: Context<ServiceA>) => ({ b: ctx.get(ServiceA).a.length })),
-);
-
-// Overriding keeps the provides, unions the patch's errors, and discharges needs.
-const failingPatch: Layer<ServiceA, EA, never> = Layer.make(
-  ServiceA,
-  (): Result<{ readonly a: string }, EA> => Ok({ a: "fake" }),
-);
-const overridden = Layer.override(wiredForOverride, [failingPatch]);
-type _overridden = Expect<Equal<typeof overridden, Layer<ServiceA | ServiceB, EA, never>>>;
-
-// A patch may also add a brand-new tag — it joins the provides union.
-const withNew = Layer.override(wiredForOverride, [Layer.value(ServiceC, { c: true })]);
-type _withNew = Expect<Equal<typeof withNew, Layer<ServiceA | ServiceB | ServiceC, never, never>>>;
-
-// The base MUST be an assembled (`Layer.wire`) graph — a plain layer is rejected,
-// because only a wired layer carries the source needed to re-assemble deeply.
-const plainBase: Layer<ServiceA, never, never> = Layer.value(ServiceA, { a: "x" });
-// @ts-expect-error - override requires a wired base, not a plain layer.
-Layer.override(plainBase, [Layer.value(ServiceA, { a: "y" })]);
-
-// --- 9. Layer.member + Layer.collect: multi-bindings / plugin collections -----
+// --- 7. Layer.member + Layer.collect: multi-bindings / plugin collections -----
 
 type Plugin = { readonly name: string };
 class Plugins extends Tag("Plugins")<Plugins, readonly Plugin[]>() {}
@@ -231,7 +175,7 @@ type _emptyCollected = Expect<Equal<typeof emptyCollected, Layer<Plugins, never,
 // @ts-expect-error - ServiceA is not the Plugins collection tag.
 Layer.collect(Plugins, [Layer.value(ServiceA, { a: "x" })]);
 
-// --- 10. Layer.onStart + Layer.onStop: lifecycle hooks -----------------------
+// --- 8. Layer.onStart + Layer.onStop: lifecycle hooks -----------------------
 
 // onStart unions the hook's error into E; provides and needs (contravariant!) are kept.
 declare const startBase: Layer<ServiceA, EA, ServiceB>;

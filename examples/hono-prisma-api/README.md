@@ -2,9 +2,8 @@
 
 The canonical demesne example: a **clean-architecture REST API** — a `todos` resource (list /
 get / create) — that shows how `demesne`, `unthrown`, **Hono**, **zod** and **Prisma**
-(Postgres) fit together, and exercises the full combinator surface (`wire` / `provideTo` /
-`member` / `collect` / `override` / `forkScope` / `onStart` / `onStop` / `acquireRelease` /
-`scoped`).
+(Postgres) fit together, and exercises the combinator surface (`provideTo` / `merge` /
+`member` / `collect` / `forkScope` / `onStart` / `onStop` / `acquireRelease` / `scoped`).
 
 ```
 src/
@@ -37,18 +36,19 @@ prisma.config.ts               # Prisma 7 config (migrate connection URL)
   (`@prisma/adapter-pg`) takes the URL from the zod-validated config, not the schema.
 - **Ports keep Prisma out of the core.** The `TodoRepository` port speaks only domain types;
   the Prisma-backed adapter maps rows to `Todo` and turns a missing row into `TodoNotFound`.
-- **One bootstrap for the app and the tests.** `bootstrap.ts` assembles the app around a
-  repository provider; `app.ts` calls `bootstrap(prismaRepo)`, the tests call
-  `bootstrap(fake)`, so both build the **same app** — only the storage differs, and the tests
-  need no database. A startup check (`Layer.onStart`) runs a real query before serving.
+- **One bootstrap for the app and the tests (the test seam).** `bootstrap.ts` assembles the
+  app around a repository provider by hand (`provideTo` / `merge` — demesne has no auto-wiring);
+  `app.ts` calls `bootstrap(prismaRepo)`, the tests call `bootstrap(fake)`, so both build the
+  **same app** — only the storage differs, and the tests need no database. Parameterizing the
+  graph like this is how you swap a real adapter for a fake. A startup check (`Layer.onStart`)
+  runs a real query before serving.
 - **unthrown → Hono (the edge).** `http/routes.ts` resolves use cases from the demesne
   `Context` and maps each `Result` with `.match<Response>`: `ok` → 200/201, a domain
   `TodoNotFound` → 404, any other modeled error → 500, a `defect` (unmodeled throw) → 500.
   zod validates the request body (400 on failure).
 - **Plugins & scopes.** A plugin collection (`Layer.member` / `Layer.collect`) accumulates
-  audit sinks that the create route fans an event out to. The tests also show `Layer.override`
-  (swap a service deep in the assembled app), `Layer.forkScope` (a per-request child scope on
-  the built app) and `Layer.onStop` (teardown on scope close).
+  audit sinks that the create route fans an event out to. The tests also show `Layer.forkScope`
+  (a per-request child scope on the built app) and `Layer.onStop` (teardown on scope close).
 
 ## Prisma 7 notes
 

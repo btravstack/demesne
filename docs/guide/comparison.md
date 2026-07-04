@@ -56,11 +56,15 @@ unthrown.
 
 ## Beyond TypeScript
 
-The `Layer` idea comes from **Scala's ZIO `ZLayer`** (and Effect ported it to TS), whose
-automatic-assembly `ZLayer.make` inspired demesne's `Layer.wire`. Compile-time DI without
-reflection also lives in **Dagger** (Kotlin/Java), **google/wire** (Go), and **MacWire**
-(Scala) — but via code generation, whereas demesne gets the same guarantee (and the
-automatic wiring) from types alone. On the other end, **.NET**, **Spring**, **Guice**, and
+The `Layer` idea comes from **Scala's ZIO `ZLayer`** (and Effect ported it to TS). ZIO's
+`ZLayer.make` auto-assembles the graph because its requirements live in the types the
+compiler threads for you; demesne deliberately doesn't infer requirements, so it can't
+auto-assemble safely — you compose the graph by hand with `provideTo` / `merge`, which stays
+single-pass and fully type-checked (a missing dependency is a compile error, and there's no
+runtime resolution to surprise you). Compile-time DI without reflection also lives in
+**Dagger** (Kotlin/Java), **google/wire** (Go), and **MacWire** (Scala) — but via code
+generation, whereas demesne gets the guarantee from types alone. On the other end, **.NET**,
+**Spring**, **Guice**, and
 **Koin** resolve at runtime with rich lifetime/scope models but late failure. And a whole
 camp — idiomatic **Rust** (`AppState` + extractors), **Go** "pure DI", **Ruby** POROs —
 argues you often need no framework at all: demesne's `Context<R>` _is_ that hand-assembled

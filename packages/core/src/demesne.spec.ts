@@ -393,161 +393,6 @@ describe("scopes: acquireRelease + scoped", () => {
   });
 });
 
-describe("Layer.wire: automatic assembly", () => {
-  it("assembles a graph given in any order, providing every service", async () => {
-    const LoggerLive = Layer.value(LoggerService, { log: () => {} });
-    const ConfigLive = Layer.make(
-      AppConfig,
-      (): Result<ServiceOf<typeof AppConfig>, never> => Ok({ dbUrl: "postgres://localhost/app" }),
-    );
-    // make with a dependency (defers via a Defect until AppConfig is ready)
-    const DatabaseLive = Layer.make(DatabaseService, (ctx: Context<AppConfig>) => {
-      ctx.get(AppConfig);
-      return Ok<ServiceOf<typeof DatabaseService>>({ query: () => [] }).toAsync();
-    });
-    // factory with a dependency (defers via a synchronous throw until Database is ready)
-    const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<DatabaseService>) => {
-      const db = ctx.get(DatabaseService);
-      return {
-        findById: (id) =>
-          (db.query(`q ${id}`)[0] as Order | undefined) === undefined
-            ? Err(new OrderNotFound({ id })).toAsync()
-            : Ok(db.query(`q ${id}`)[0] as Order).toAsync(),
-      };
-    });
-
-    // Deliberately listed dependents-before-dependencies — wire figures out the order.
-    const app = Layer.wire(OrderRepoLive, LoggerLive, DatabaseLive, ConfigLive);
-    const result = await Layer.build(app);
-
-    expect(result.isOk()).toBe(true);
-    const ctx = result.unwrap();
-    ctx.get(LoggerService).log("ok");
-    // intermediates are provided too, not hidden
-    expect(ctx.get(AppConfig).dbUrl).toBe("postgres://localhost/app");
-    const found = await ctx.get(OrderRepository).findById("order-1");
-    expect(found.unwrapErr()).toBeInstanceOf(OrderNotFound);
-  });
-
-  it("short-circuits on the first construction Err", async () => {
-    const Good = Layer.value(Marker, { ok: true });
-    const Bad = Layer.make(
-      AppConfig,
-      (): Result<ServiceOf<typeof AppConfig>, ConfigError> =>
-        Err(new ConfigError({ reason: "nope" })),
-    );
-
-    const result = await Layer.build(Layer.wire(Good, Bad));
-
-    expect(result.unwrapErr()).toBeInstanceOf(ConfigError);
-  });
-
-  it("a genuine throw during construction propagates as a Defect", async () => {
-    const Boom = Layer.factory(Marker, (): ServiceOf<typeof Marker> => {
-      throw new Error("boom");
-    });
-
-    const result = await Layer.build(Layer.wire(Boom, Layer.value(AppConfig, { dbUrl: "x" })));
-
-    expect(result.isDefect()).toBe(true);
-  });
-
-  it("a dependency cycle among wired layers becomes a Defect", async () => {
-    class TagX extends Tag("TagX")<TagX, { readonly x: number }>() {}
-    class TagY extends Tag("TagY")<TagY, { readonly y: number }>() {}
-    const X = Layer.make(
-      TagX,
-      (ctx: Context<TagY>): Result<{ readonly x: number }, never> => Ok({ x: ctx.get(TagY).y }),
-    );
-    const Y = Layer.make(
-      TagY,
-      (ctx: Context<TagX>): Result<{ readonly y: number }, never> => Ok({ y: ctx.get(TagX).x }),
-    );
-
-    // Types allow it (Needs = Exclude<TagX | TagY, TagX | TagY> = never); the cycle is a
-    // runtime Defect that NAMES the cyclic services (the type system can't catch cycles).
-    const result = await Layer.build(Layer.wire(X, Y));
-
-    const message = result.match({
-      ok: () => "ok",
-      err: () => "err",
-      defect: (cause) => String(cause),
-    });
-    expect(message).toContain("dependency cycle among the services [TagX, TagY]");
-  });
-
-  it("resolves a composite layer (onStart over a make) whose dep is a wire sibling", async () => {
-    // A make wrapped in onStart, needing a sibling: the composition that used to poison
-    // wire's shared memo across deferral rounds and surface a FALSE "dependency cycle".
-    // buildMemo now evicts MissingDependency Defects, so it resolves.
-    const ConfigLive = Layer.make(
-      AppConfig,
-      (): Result<ServiceOf<typeof AppConfig>, never> => Ok({ dbUrl: "postgres://localhost/app" }),
-    );
-    const DbBase = Layer.make(DatabaseService, (ctx: Context<AppConfig>) => {
-      ctx.get(AppConfig); // deferred until AppConfig is built
-      return Ok<ServiceOf<typeof DatabaseService>>({ query: () => [] }).toAsync();
-    });
-    const DbLive = Layer.onStart(DbBase, (): Result<void, never> => Ok(undefined));
-
-    const result = await Layer.build(Layer.wire(ConfigLive, DbLive));
-
-    expect(result.isOk()).toBe(true);
-  });
-
-  it("resolves a collect whose member needs a wire sibling", async () => {
-    class Sink extends Tag("WireSink")<Sink, { readonly n: number }>() {}
-    type Item = { readonly n: number };
-    class Items extends Tag("WireItems")<Items, readonly Item[]>() {}
-
-    const SinkLive = Layer.value(Sink, { n: 5 });
-    const M1 = Layer.member(Items, (ctx: Context<Sink>) => ({ n: ctx.get(Sink).n }));
-    const M2 = Layer.member(Items, () => ({ n: 2 }));
-
-    // collect's member reads Sink from a sibling — previously required a `provideTo`
-    // work-around, now resolves directly.
-    const ctx = (await Layer.build(Layer.wire(SinkLive, Layer.collect(Items, [M1, M2])))).unwrap();
-
-    expect(ctx.get(Items).map((i) => i.n)).toEqual([5, 2]);
-  });
-
-  it("orders wired acquireRelease layers and releases them in reverse (LIFO)", async () => {
-    const events: string[] = [];
-    class WPoolA extends Tag("WPoolA")<WPoolA, { readonly id: number }>() {}
-    class WPoolB extends Tag("WPoolB")<WPoolB, { readonly id: number }>() {}
-
-    const A = Layer.acquireRelease(
-      WPoolA,
-      (): Result<{ readonly id: number }, never> => {
-        events.push("acquire:A");
-        return Ok({ id: 1 });
-      },
-      () => {
-        events.push("release:A");
-      },
-    );
-    const B = Layer.acquireRelease(
-      WPoolB,
-      (ctx: Context<WPoolA>): Result<{ readonly id: number }, never> => {
-        events.push(`acquire:B(sees ${ctx.get(WPoolA).id})`);
-        return Ok({ id: 2 });
-      },
-      () => {
-        events.push("release:B");
-      },
-    );
-
-    // B needs A; wire resolves the order, and the resulting graph needs a Scope.
-    const out = await Layer.scoped(
-      Layer.wire(B, A),
-      (ctx): Result<number, never> => Ok(ctx.get(WPoolB).id),
-    );
-
-    expect(out.unwrap()).toBe(2);
-    expect(events).toEqual(["acquire:A", "acquire:B(sees 1)", "release:B", "release:A"]);
-  });
-});
-
 describe("Layer.forkScope: request / child scopes", () => {
   it("shares parent services and adds request-scoped ones", async () => {
     const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
@@ -644,110 +489,6 @@ describe("Layer.forkScope: request / child scopes", () => {
   });
 });
 
-describe("Layer.override: swap providers in an assembled graph", () => {
-  // A graph where a consumer CAPTURES a dependency at construction time — the
-  // witness that override must be deep, not a post-build overwrite.
-  class Cfg extends Tag("OvCfg")<Cfg, { readonly url: string }>() {}
-  class Db extends Tag("OvDb")<Db, { readonly url: string }>() {}
-  class Repo extends Tag("OvRepo")<Repo, { readonly find: () => string }>() {}
-  class UseCase extends Tag("OvUseCase")<UseCase, { readonly run: () => string }>() {}
-
-  const CfgLive = Layer.value(Cfg, { url: "real-cfg" });
-  const DbLive = Layer.factory(Db, (c: Context<Cfg>) => ({ url: `db(${c.get(Cfg).url})` }));
-  const RepoLive = Layer.factory(Repo, (c: Context<Db>) => ({
-    find: () => `repo->${c.get(Db).url}`,
-  }));
-  const UseCaseLive = Layer.factory(UseCase, (c: Context<Repo>) => {
-    const repo = c.get(Repo); // captured at construction — a shallow swap would miss this
-    return { run: () => `usecase:${repo.find()}` };
-  });
-
-  const App = Layer.wire(CfgLive, DbLive, RepoLive, UseCaseLive);
-
-  it("replaces a provider deeply — a consumer that captured it sees the patch", async () => {
-    const fakeRepo = Layer.value(Repo, { find: () => "FAKE" });
-    const ctx = (await Layer.build(Layer.override(App, [fakeRepo]))).unwrap();
-
-    expect(ctx.get(Repo).find()).toBe("FAKE");
-    expect(ctx.get(UseCase).run()).toBe("usecase:FAKE"); // deep: use case sees the fake
-    expect(ctx.get(Db).url).toBe("db(real-cfg)"); // untouched services stay real
-  });
-
-  it("propagates an overridden intermediate through the whole chain", async () => {
-    const fakeDb = Layer.value(Db, { url: "FAKEDB" });
-    const ctx = (await Layer.build(Layer.override(App, [fakeDb]))).unwrap();
-
-    expect(ctx.get(Repo).find()).toBe("repo->FAKEDB");
-    expect(ctx.get(UseCase).run()).toBe("usecase:repo->FAKEDB");
-  });
-
-  it("keeps the base intact and can add a brand-new tag", async () => {
-    class Extra extends Tag("OvExtra")<Extra, { readonly n: number }>() {}
-    const ExtraLive = Layer.value(Extra, { n: 42 });
-    const ctx = (await Layer.build(Layer.override(App, [ExtraLive]))).unwrap();
-
-    expect(ctx.get(UseCase).run()).toBe("usecase:repo->db(real-cfg)"); // base untouched
-    expect(ctx.get(Extra).n).toBe(42); // patch added a new service
-  });
-
-  it("still runs the base's resource finalizers (base body runs; its value is discarded)", async () => {
-    const events: string[] = [];
-    class Conn extends Tag("OvConn")<Conn, { readonly tag: string }>() {}
-    const ConnLive = Layer.acquireRelease(
-      Conn,
-      (): Result<{ readonly tag: string }, never> => {
-        events.push("acquire-real");
-        return Ok({ tag: "real" });
-      },
-      () => {
-        events.push("release-real");
-      },
-    );
-    const Base = Layer.wire(ConnLive);
-    const fakeConn = Layer.value(Conn, { tag: "fake" });
-
-    const out = await Layer.scoped(
-      Layer.override(Base, [fakeConn]),
-      (ctx): Result<string, never> => Ok(ctx.get(Conn).tag),
-    );
-
-    expect(out.unwrap()).toBe("fake"); // consumers see the patch
-    // the base resource's own body still ran and was torn down (best-effort, LIFO)
-    expect(events).toEqual(["acquire-real", "release-real"]);
-  });
-
-  it("short-circuits when a patch fails to construct", async () => {
-    class Flaky extends Tag("OvFlaky")<Flaky, { readonly ok: boolean }>() {}
-    class OvBoom extends TaggedError("OvBoom")<{ why: string }> {}
-    const flakyPatch = Layer.make(
-      Flaky,
-      (): Result<{ readonly ok: boolean }, OvBoom> => Err(new OvBoom({ why: "nope" })),
-    );
-
-    const out = await Layer.build(Layer.override(App, [flakyPatch]));
-
-    expect(out.unwrapErr()).toBeInstanceOf(OvBoom);
-  });
-
-  it("wins even over a service supplied by the surrounding context", async () => {
-    class Ext extends Tag("OvExt")<Ext, { readonly v: string }>() {}
-    class Consumer extends Tag("OvConsumer")<Consumer, { readonly v: string }>() {}
-    // Base needs Ext (provided from outside) and a consumer captures it.
-    const ConsumerLive = Layer.factory(Consumer, (c: Context<Ext>) => ({ v: c.get(Ext).v }));
-    const Base = Layer.wire(ConsumerLive);
-
-    const realExt = Layer.value(Ext, { v: "ambient" });
-    const fakeExt = Layer.value(Ext, { v: "override" });
-    // Feed the *real* Ext from the surrounding context, then override it: the patch
-    // must beat both the base graph and the ambient value.
-    const graph = Layer.provideTo(Layer.override(Base, [fakeExt]), realExt);
-    const ctx = (await Layer.build(graph)).unwrap();
-
-    expect(ctx.get(Ext).v).toBe("override");
-    expect(ctx.get(Consumer).v).toBe("override");
-  });
-});
-
 describe("Layer.member + Layer.collect: multi-bindings / plugin collections", () => {
   type Plugin = { readonly name: string; readonly weight: number };
   class Plugins extends Tag("Plugins")<Plugins, readonly Plugin[]>() {}
@@ -767,7 +508,7 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     ]);
   });
 
-  it("threads each member's own requirements, satisfied by the surrounding wire", async () => {
+  it("threads each member's own requirements, discharged with provideTo", async () => {
     class Config extends Tag("MbConfig")<Config, { readonly env: string }>() {}
     const Auth = Layer.member(Plugins, (c: Context<Config>) => ({
       name: `auth-${c.get(Config).env}`,
@@ -775,9 +516,10 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     }));
     const Metrics = Layer.member(Plugins, () => ({ name: "metrics", weight: 2 }));
 
-    const App = Layer.wire(
-      Layer.value(Config, { env: "prod" }),
+    // the collection needs Config (its Auth member reads it) — feed it in with provideTo
+    const App = Layer.provideTo(
       Layer.collect(Plugins, [Auth, Metrics]),
+      Layer.value(Config, { env: "prod" }),
     );
     const ctx = (await Layer.build(App)).unwrap();
 
@@ -802,6 +544,16 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
 
   it("yields an empty collection for no members", async () => {
     const ctx = (await Layer.build(Layer.collect(Plugins, []))).unwrap();
+    expect(ctx.get(Plugins)).toEqual([]);
+  });
+
+  it("skips a member whose context lacks the collection key (defensive)", async () => {
+    class Other extends Tag("MbOther")<Other, { readonly x: number }>() {}
+    // a layer that provides a DIFFERENT tag, widened to satisfy collect's member type —
+    // its output contributes nothing, exercising the defensive `arr === undefined` skip.
+    const notAMember = Layer.value(Other, { x: 1 }) as unknown as Layer<Plugins, never, never>;
+
+    const ctx = (await Layer.build(Layer.collect(Plugins, [notAMember]))).unwrap();
     expect(ctx.get(Plugins)).toEqual([]);
   });
 
@@ -840,10 +592,13 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       },
     );
 
-    const out = await Layer.scoped(Layer.wire(ConfigLive, DbLive), (ctx): Result<string, never> => {
-      log.push("use");
-      return Ok(ctx.get(Db).url);
-    });
+    const out = await Layer.scoped(
+      Layer.provideTo(DbLive, ConfigLive),
+      (ctx): Result<string, never> => {
+        log.push("use");
+        return Ok(ctx.get(Db).url);
+      },
+    );
 
     expect(out.unwrap()).toBe("db(cfg)");
     expect(log).toEqual(["start:config", "start:migrate db(cfg)", "use"]);
@@ -871,7 +626,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       (): Result<void, MigrationError> => Err(new MigrationError({ why: "schema drift" })),
     );
 
-    const out = await Layer.build(Layer.wire(DbLive));
+    const out = await Layer.build(DbLive);
     // a failed start hook surfaces as the graph's Err (build has no `use` to reach).
     expect(out.unwrapErr()).toBeInstanceOf(MigrationError);
   });
@@ -892,7 +647,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       },
     );
 
-    const out = await Layer.scoped(Layer.wire(DbLive), (): Result<string, never> => {
+    const out = await Layer.scoped(DbLive, (): Result<string, never> => {
       log.push("use");
       return Ok("x");
     });
@@ -913,7 +668,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       },
     );
 
-    const out = await Layer.scoped(Layer.wire(A, B), (ctx): Result<string, never> => {
+    const out = await Layer.scoped(Layer.provideTo(B, A), (ctx): Result<string, never> => {
       log.push("use");
       return Ok(ctx.get(Db).url);
     });

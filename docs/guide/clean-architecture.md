@@ -144,18 +144,24 @@ const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<Database>) =>
 
 ## Composition root
 
-Hand every layer to **`Layer.wire`** and it resolves the dependency order for you.
-`Layer.build` runs the whole graph once at the edge (handling every **wiring** failure as
-a static union); you then resolve a use case from the built context and call `execute`.
+Compose the graph **by hand** with `provideTo` and `merge` — single-pass and fully
+type-checked. Thread each adapter into the port that needs it, then `merge` the branches
+into one app layer. `Layer.build` runs the whole graph once at the edge (handling every
+**wiring** failure as a static union); you then resolve a use case from the built context
+and call `execute`.
 
 ```ts
 // main.ts
 import { Layer } from "demesne";
 
-// Listed in any order — wire figures out the graph, and any layer whose requirement no
-// other layer provides is a compile error.
-const AppLayer = Layer.wire(GetOrderLive, LoggerLive, OrderRepoLive, DatabaseLive, ConfigLive);
-//    ^? Layer<GetOrder | Logger | OrderRepository | Database | AppConfig, ConnectionError | ConfigError, never>
+// Thread the dependency chain — Config → Database → OrderRepository → GetOrder.
+const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
+const RepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
+const GetOrderWired = Layer.provideTo(GetOrderLive, Layer.merge(LoggerLive, RepoWired));
+
+// Merge the branches into the app layer — a port left unthreaded is a compile error here.
+const AppLayer = Layer.merge(GetOrderWired, LoggerLive, RepoWired, DatabaseWired);
+//    ^? Layer<GetOrder | Logger | OrderRepository | Database, ConnectionError | ConfigError, never>
 
 const wiring = await Layer.build(AppLayer);
 //    ^? Result<Context<GetOrder | …>, ConnectionError | ConfigError>

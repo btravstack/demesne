@@ -85,69 +85,62 @@ const AppLayer = Layer.merge(LoggerLive, RepoWired, DatabaseWired);
 //    ^? Layer<Logger | OrderRepository | Database, ConnectionError | ConfigError, never>
 ```
 
-### `Layer.wire` — assemble a set automatically
+### Compose the whole graph by hand
 
-`merge` builds its layers _independently_ (they don't feed each other); `provideTo`
-threads one into another _by hand_. **`Layer.wire`** does the threading for you: each
-layer's requirements may be satisfied by **any other layer in the set**, so you list them
-in any order and wire resolves the dependency graph.
+demesne has **no auto-wiring**: you assemble the graph yourself with `provideTo` and
+`merge`. That is single-pass and fully type-checked — thread each layer into the one that
+needs it, then `merge` the independent branches into the app layer.
 
 ```ts
-// before — hand-threaded, order matters
+// Thread the dependency chain: Config → Database → OrderRepository.
 const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
 const RepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
-const AppLayer = Layer.merge(LoggerLive, RepoWired, DatabaseWired);
 
-// after — one call, any order
-const AppLayer = Layer.wire(OrderRepoLive, LoggerLive, ConfigLive, DatabaseLive);
-//    ^? Layer<OrderRepository | Logger | AppConfig | Database, ConnectionError | ConfigError, never>
+// Merge the independent branches into one app layer.
+const AppLayer = Layer.merge(LoggerLive, RepoWired, DatabaseWired);
+//    ^? Layer<Logger | OrderRepository | Database, ConnectionError | ConfigError, never>
 ```
 
-wire provides the **union of every service** (intermediates included), unions the errors,
-and its remaining `Needs` are exactly the services **no layer in the set provides**. So a
-self-contained set is `Needs = never` (ready to `build`), and a missing dependency stays
-in the type — `build` names it as a compile error.
+Each `provideTo` **discharges** the requirement it feeds (`Needs` shrinks by
+`Exclude<N, P2>`); once every port a layer depends on has been threaded in, its remaining
+`Needs` is `never` and `Layer.build` compiles. A dependency you forgot to thread stays in
+the type — `build` names it as a compile error.
 
-::: tip Runtime & limits
-wire builds each layer a round at a time against the services built so far (a layer that
-reads a not-yet-built dependency is deferred), so **order doesn't matter**. A first `Err`
-short-circuits; a genuine dependency **cycle** surfaces as a `Defect` that names the
-services involved (the types can't catch cycles). Composed layers (`onStart`, `collect`,
-`provideTo`, …) are fine as members. One caveat: because a deferred layer's build is
-**re-run** each round, a factory / `acquire` passed to wire should be idempotent and read
-its dependencies **before** any side effect — otherwise the effect repeats (and an
-`acquire` that opens a resource before reading a deferred dep leaks it).
+::: tip Shared layers build once
+List a layer in more than one branch (here `DatabaseWired` feeds `RepoWired` **and** is
+merged for its own `Database` service) and it still constructs exactly once per build — the
+build memoizes by reference. So hand-composition never double-builds a shared dependency.
 :::
 
-### `Layer.override` — swap providers in an assembled graph
+### Testing: parameterize the graph by its dependencies
 
-The testing seam. **`Layer.override(base, patches)`** takes a `Layer.wire`-assembled graph
-and a list of patch layers whose providers **win**, keeping everything else — swap a real
-adapter for a fake without hand-rewiring the graph.
+There is no override combinator. To swap a real adapter for a fake in a test, make the
+volatile dependency a **parameter** of the composition: write a `bootstrap(repository)`
+function that takes the repository layer and threads it in with `provideTo` / `merge`. The
+server passes the real adapter; a test passes an in-memory fake — the rest of the graph is
+identical.
 
 ```ts
-const AppLayer = Layer.wire(GetOrderLive, LoggerLive, OrderRepoLive, DatabaseLive, ConfigLive);
+// Generic over the whole repository layer, so its provisions/errors/requirements flow through.
+const bootstrap = <R extends Layer<OrderRepository, unknown, unknown>>(repository: R) => {
+  const useCases = Layer.merge(GetOrderLive /* , … */);
+  const wired = Layer.provideTo(useCases, Layer.merge(LoggerLive, repository));
+  return Layer.merge(LoggerLive, repository, wired);
+};
 
-// in a test — same graph, one provider swapped:
-const TestApp = Layer.override(AppLayer, [Layer.value(OrderRepository, fakeRepo)]);
+// production — the real adapter (needs Database/Config, which it carries in):
+const AppLayer = bootstrap(RepoWired);
+
+// test — an in-memory fake that provides the port and needs nothing:
+const TestApp = bootstrap(Layer.value(OrderRepository, fakeRepo));
 const ctx = (await Layer.build(TestApp)).unwrap();
-ctx.get(OrderRepository); // the fake — and so does every layer that consumed it
+ctx.get(OrderRepository); // the fake — and so does every use case that consumed it
 ```
 
-The override is **deep**: a use case that captured `OrderRepository` in its constructor
-sees the fake too — not just a direct `ctx.get`. That's why `base` must be a `wire` result
-(only that carries the source layers to re-assemble); a plain, already-built layer has
-consumed its dependencies and is a compile error here. The provides union gains any new
-tag a patch introduces, errors union, and a patch that supplies a tag the base needed
-externally **discharges** that requirement.
-
-::: tip Patches are usually `Layer.value`
-Overrides are typically `Layer.value(Tag, fake)`. A patch may also be a `factory` / `make`,
-but it may only depend on services available **outside** the base (the base's own services
-aren't threaded into it). The base's original provider for a patched tag still runs — so if
-you override a resource (`acquireRelease`) tag, the base resource is still acquired and
-released; its value is simply discarded.
-:::
+Because the fake is threaded in exactly where the real one was, every consumer (a use case
+that captured `OrderRepository` in its constructor included) sees it — the swap is deep, and
+it stays fully type-checked. See [`examples/hono-prisma-api`](https://github.com/btravstack/demesne/tree/main/examples/hono-prisma-api)
+for a runnable `bootstrap` that both the server and the tests build through.
 
 ### `Layer.member` + `Layer.collect` — multi-bindings
 
@@ -169,7 +162,7 @@ const TracingLive = Layer.member(Plugins, () => tracingPlugin());
 const AllPlugins = Layer.collect(Plugins, [AuthLive, MetricsLive, TracingLive]);
 //    ^? Layer<Plugins, never, Config>   — Plugins resolves to readonly Plugin[]
 
-const app = Layer.wire(ConfigLive, AllPlugins, /* …consumers of Plugins… */);
+const app = Layer.merge(Layer.provideTo(AllPlugins, ConfigLive), /* …consumers of Plugins… */);
 ctx.get(Plugins); // [auth, metrics, tracing] — in listed order
 ```
 

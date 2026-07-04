@@ -145,7 +145,7 @@ const ServerLive = Layer.onStop(HttpServerLive, (ctx: Context<HttpServer>) =>
   ctx.get(HttpServer).drain(),
 );
 
-const result = await Layer.scoped(Layer.wire(DbLive, ServerLive, /* … */), use);
+const result = await Layer.scoped(Layer.merge(DbLive, ServerLive, /* … */), use);
 // build everything → run start hooks (dep order) → use → run stop hooks + releases (LIFO)
 ```
 
@@ -165,11 +165,10 @@ Notes:
   so the compiler makes you consume it with `scoped`. The hook is infallible, like
   `release`. (A service that both acquires and releases is just `acquireRelease`; `onStop`
   adds shutdown to a service built some other way.)
-- **A hook-wrapped layer is a fine `wire` member.** `onStart(SomeLive, …)` can sit directly
-  in a `Layer.wire(...)` even when `SomeLive` needs a sibling — wire defers and rebuilds it
-  like any leaf (the memo self-heals). The only caveat is the general wire one: the wrapped
-  factory / `acquire` should be idempotent and read its deps before any side effect (see
-  [Layers & Wiring](./layers-and-wiring#layer-wire-assemble-a-set-automatically)).
+- **A hook-wrapped layer composes like any other.** `onStart(SomeLive, …)` can be threaded
+  with `provideTo` / `merge` just like `SomeLive` itself — the hook rides along on the layer,
+  running after the whole graph is built (see
+  [Layers & Wiring](./layers-and-wiring#compose-the-whole-graph-by-hand)).
 
 ## Future
 

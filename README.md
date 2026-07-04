@@ -236,19 +236,24 @@ const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<Database>) =>
 
 ### Composition root
 
-Hand every layer to **`Layer.wire`** and it resolves the dependency order for you — no
-manual `provideTo` / `merge` threading. `Layer.build` runs the whole graph once at the
-edge (handling every **wiring** failure as a static union); you then resolve a use case
-from the built context and call `execute`.
+Compose the graph by hand with `provideTo` / `merge` — single-pass and fully type-checked,
+no runtime resolution. `provideTo(self, dep)` feeds one layer into another, **discharging**
+the requirement they share; `merge` combines independent branches. `Layer.build` runs the
+whole graph once at the edge (handling every **wiring** failure as a static union); you then
+resolve a use case from the built context and call `execute`.
 
 ```ts
 // main.ts
 import { Layer } from "demesne";
 
-// Listed in any order — wire figures out the graph, and any layer whose requirement no
-// other layer provides is a compile error.
-const AppLayer = Layer.wire(GetOrderLive, LoggerLive, OrderRepoLive, DatabaseLive, ConfigLive);
-//    ^? Layer<GetOrder | Logger | OrderRepository | Database | AppConfig, ConnectionError | ConfigError, never>
+// Thread each dependency into the layer that needs it: Config → Database → OrderRepository.
+const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
+const RepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
+const GetOrderWired = Layer.provideTo(GetOrderLive, Layer.merge(LoggerLive, RepoWired));
+
+// Merge the branches into the app layer. Shared layers (DatabaseWired) build once.
+const AppLayer = Layer.merge(GetOrderWired, LoggerLive, RepoWired, DatabaseWired);
+//    ^? Layer<GetOrder | Logger | OrderRepository | Database, ConnectionError | ConfigError, never>
 
 const wiring = await Layer.build(AppLayer);
 //    ^? Result<Context<GetOrder | …>, ConnectionError | ConfigError>
@@ -270,15 +275,15 @@ if (wiring.isOk()) {
 }
 ```
 
-Forget to wire `ConfigLive`, and `Layer.build(AppLayer)` is a **compile error** —
+Forget to thread `ConfigLive` in, and `Layer.build(AppLayer)` is a **compile error** —
 `Needs` is not `never`. Add a new fallible `Layer.make` anywhere in an adapter, and its
 error type appears in the wiring union that `match` must handle.
 
 > This whole pattern is a real, runnable program in
 > [`examples/hono-prisma-api`](./examples/hono-prisma-api) — a clean-architecture **Hono**
 > REST API with a **zod**-parsed environment, **Prisma**/Postgres behind a port, `unthrown`
-> `Result`s mapped to HTTP status codes, and the full combinator surface (`wire`, `override`,
-> `forkScope`, `member`/`collect`, `onStart`/`onStop`). It's compiled by `tsc` against
+> `Result`s mapped to HTTP status codes, and the combinator surface (`provideTo`/`merge`,
+> `member`/`collect`, `forkScope`, `onStart`/`onStop`). It's compiled by `tsc` against
 > demesne's built types and tested (no database needed) in CI, so the snippets above can't
 > drift from working code.
 
@@ -377,13 +382,13 @@ const summary = await Layer.scoped(provideTo(RepoLive, PoolLive), (ctx) =>
 
 ## Roadmap
 
-The wiring core is complete: requirements and errors as static unions, variadic `merge`,
-automatic assembly (`Layer.wire`), namespaced API, memoization, scoped resources,
-**type-level scope enforcement** (the compiler rejects a resource graph passed to
-`build`), **request / child scopes** (`Layer.forkScope`), a **deep test override**
-(`Layer.override`), **multi-bindings** (`Layer.member` / `Layer.collect`), and **lifecycle
-hooks** (`Layer.onStart` / `Layer.onStop`). Further ideas live in
-[`CLAUDE.md`](./CLAUDE.md).
+The wiring core is complete: requirements and errors as static unions, single-pass
+hand-threaded assembly (`provideTo` / variadic `merge`), namespaced API, memoization, scoped
+resources, **type-level scope enforcement** (the compiler rejects a resource graph passed to
+`build`), **request / child scopes** (`Layer.forkScope`), **multi-bindings** (`Layer.member` /
+`Layer.collect`), and **lifecycle hooks** (`Layer.onStart` / `Layer.onStop`). (An earlier
+`Layer.wire` / `Layer.override` — the only runtime-resolution parts — was removed as at odds
+with the compile-time thesis.) Further ideas live in [`CLAUDE.md`](./CLAUDE.md).
 
 ## License
 
