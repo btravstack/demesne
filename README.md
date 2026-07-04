@@ -183,7 +183,7 @@ export const GetOrderLive = Layer.class(GetOrder, [Logger, OrderRepository], Get
 >     return this.orders.findById(id);
 >   }
 > }
-> const GetOrderLive = GetOrder.layer; // Layer<GetOrder, never, Logger | OrderRepository>
+> const GetOrderLive = Layer.fromService(GetOrder); // Layer<GetOrder, never, Logger | OrderRepository>
 > ```
 
 ### Adapters

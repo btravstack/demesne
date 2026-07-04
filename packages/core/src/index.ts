@@ -14,6 +14,8 @@ import { Ok, allAsync, fromSafePromise, type Result, type AsyncResult } from "un
 
 const TagTypeId = Symbol.for("mini-di/Tag");
 const ContextTypeId = Symbol.for("mini-di/Context");
+// Where a `Service` subclass records its deps record, for `Layer.fromService` to read.
+const ServiceDepsId = Symbol.for("mini-di/ServiceDeps");
 
 // ---------------------------------------------------------------------------
 // Tag — a typed key. The class itself is the nominal identity that appears in
@@ -395,25 +397,21 @@ type NeedsOfRecord<R extends Record<string, Tag<any, any>>> = {
   [K in keyof R]: R[K] extends Tag<infer Self, any> ? Self : never;
 }[keyof R];
 
-// The type of a `Service(...)` base: a Tag whose service is the instance itself, an
-// injecting constructor (instances carry the resolved deps), and a `.layer` that builds it.
+// The type of a `Service(...)` base: a Tag whose service is the instance itself, plus an
+// injecting constructor (instances carry the resolved deps). `Layer.fromService(Cls)` turns it
+// into a Layer. The recorded deps live on a runtime-only static (read by `fromService`), kept
+// off this public type so a `Service` subclass stays a clean `Tag`.
 export interface ServiceClass<Self, Id extends string, R extends Record<string, Tag<any, any>>>
   extends Tag<Self, Self> {
   new (injected: InjectedOf<R>): InjectedOf<R>;
   readonly key: Id;
-  readonly layer: Layer<Self, never, NeedsOfRecord<R>>;
 }
 
-// Cache the derived layer per Service subclass so `Foo.layer` returns a STABLE reference — the
-// build memoizes by reference, and a fresh layer object per access would build twice (M1).
-const serviceLayers = new WeakMap<object, Layer<any, any, any>>();
-
-// A Service base fuses tag + constructor-injection + layer into ONE class declaration (the
+// A Service base fuses tag + constructor-injection into ONE class declaration (the
 // `Effect.Service` analog). `class Foo extends Service<Foo>()("Foo", { dep: DepTag }) {}` makes
-// `Foo` a Tag whose service is the instance, injects each entry as `this.dep` (typed from the
-// record), and exposes `Foo.layer` — the Layer that resolves the deps and constructs `new Foo`.
-// The trade vs `Layer.class`: the class extends a demesne base (coupling) for the fewest
-// artifacts. `new Foo` runs inside `.map`, so a throwing field initializer becomes a `Defect`.
+// `Foo` a Tag whose service is the instance and injects each entry as `this.dep` (typed from
+// the record); `Layer.fromService(Foo)` is its Layer. The trade vs `Layer.class`: the class
+// extends a demesne base (coupling) for the fewest artifacts.
 export const Service =
   <Self>() =>
   <const Id extends string, R extends Record<string, Tag<any, any>>>(
@@ -424,37 +422,42 @@ export const Service =
     const base = class {
       static readonly [TagTypeId] = TagTypeId;
       static readonly key = id;
+      static readonly [ServiceDepsId] = deps;
       constructor(injected: InjectedOf<R>) {
         Object.assign(this, injected);
-      }
-      // `this` is the SUBCLASS when accessed as `Foo.layer`; cache the reference per subclass.
-      static get layer(): Layer<Self, never, NeedsOfRecord<R>> {
-        const cached = serviceLayers.get(this);
-        if (cached !== undefined) return cached as Layer<Self, never, NeedsOfRecord<R>>;
-        const Ctor = this as unknown as new (injected: InjectedOf<R>) => Self;
-        const layer: Layer<Self, never, NeedsOfRecord<R>> = {
-          build: (ctx) =>
-            Ok<void>(undefined)
-              .toAsync()
-              .map(() => {
-                const injected: Record<string, unknown> = {};
-                for (const key of Object.keys(deps)) {
-                  injected[key] = (ctx as Context<any>).get(deps[key] as Tag<any, any>);
-                }
-                return unsafeAdd(emptyAny(), id, new Ctor(injected as InjectedOf<R>));
-              }),
-          meta: {
-            kind: "service",
-            key: id,
-            needs: Object.values(deps).map((t) => (t as Tag<any, any>).key),
-          },
-        };
-        serviceLayers.set(this, layer);
-        return layer;
       }
     };
     return base as unknown as ServiceClass<Self, Id, R>;
   };
+
+// Build the Layer for a `Service` subclass: resolve its recorded deps from the context and
+// construct `new Cls(injected)`. Like every constructor it returns a FRESH layer — bind it to a
+// `const` and reuse that so a shared service builds once (memoized by reference, as everywhere).
+// `new Cls` runs inside `.map`, so a throwing constructor / field initializer becomes a `Defect`
+// (like `factory` / `class`). Infallible: `E = never`.
+const fromService = <Self, Id extends string, R extends Record<string, Tag<any, any>>>(
+  cls: ServiceClass<Self, Id, R>,
+): Layer<Self, never, NeedsOfRecord<R>> => {
+  const deps = (cls as unknown as { [ServiceDepsId]: R })[ServiceDepsId];
+  const Ctor = cls as unknown as new (injected: InjectedOf<R>) => Self;
+  return {
+    build: (ctx) =>
+      Ok<void>(undefined)
+        .toAsync()
+        .map(() => {
+          const injected: Record<string, unknown> = {};
+          for (const key of Object.keys(deps)) {
+            injected[key] = (ctx as Context<any>).get(deps[key] as Tag<any, any>);
+          }
+          return unsafeAdd(emptyAny(), cls.key, new Ctor(injected as InjectedOf<R>));
+        }),
+    meta: {
+      kind: "service",
+      key: cls.key,
+      needs: Object.values(deps).map((t) => (t as Tag<any, any>).key),
+    },
+  };
+};
 
 // Distribute over a union of layers to collect each channel as a union. Naked
 // type parameters, so applying them to `Ls[number]` distributes over the tuple.
@@ -719,8 +722,8 @@ export const Context = { empty };
 // Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member` / `class`),
 // combinators (`merge` / `provideTo` / `collect` / `onStart` / `onStop`), the introspection
 // aids (`describe` / `toDot`), and the terminals `build` / `scoped` / `forkScope`. `class` is
-// constructor-injection sugar over `factory`; the
-// fused `Service` base (a Tag + `.layer`) is exported top-level, alongside `Tag`. Assembly is
+// constructor-injection sugar over `factory`; `fromService` builds the Layer for a `Service`
+// subclass (which is exported top-level, alongside `Tag`). Assembly is
 // single-pass and fully type-checked: you compose a graph by hand with `provideTo` / `merge`
 // (there is no runtime auto-wiring).
 export const Layer = {
@@ -730,6 +733,7 @@ export const Layer = {
   acquireRelease,
   member,
   class: classLayer,
+  fromService,
   merge,
   provideTo,
   collect,

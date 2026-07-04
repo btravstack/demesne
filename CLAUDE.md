@@ -131,14 +131,21 @@ becomes a `Defect`, like `factory`):
   type-checked against the constructor's parameters (wrong order / type / arity is a compile
   error via `new (...args: DepServices<D>) => Instance`); `Needs` is the union of the deps'
   identities. The class stays **plain** — it never imports demesne.
-- **`Service<Self>()(id, {deps})`** — the fused `Effect.Service` analog: **one** class
-  declaration is the Tag, the injected `this.dep` fields (typed from the record), and a
-  `.layer` (memoized to a **stable reference** so a shared service builds once). The trade is
-  coupling — the class **extends a demesne base** — in exchange for the fewest artifacts. For a
-  `Service`, the tag's identity and its service shape **coincide** (`Tag<Self, Self>`), the one
-  deliberate exception to invariant #3's tag-≠-service rule (opt-in, like Effect). Do **not**
-  make `Layer.class`/`Service` fallible or async (that's `make`'s lane), and do **not** drop
-  the `.layer` reference cache (a fresh object per access would defeat memoization — see #10).
+- **`Service<Self>()(id, {deps})`** + **`Layer.fromService(Cls)`** — the fused `Effect.Service`
+  analog: **one** class declaration is the Tag and the injected `this.dep` fields (typed from
+  the record, `Object.assign`ed by the base constructor); `Layer.fromService(Cls)` reads the
+  class's recorded deps (a runtime-only static, kept off the public `ServiceClass` type) and
+  builds `new Cls(injected)`. The trade is coupling — the class **extends a demesne base** — in
+  exchange for the fewest artifacts, and instances still construct directly for tests
+  (`new Cls({dep})`, no container). For a `Service`, the tag's identity and its service shape
+  **coincide** (`Tag<Self, Self>`), the one deliberate exception to invariant #3's tag-≠-service
+  rule (opt-in, like Effect). `fromService` returns a **fresh** layer per call like every
+  constructor — bind it to a `const` for singleton reuse (do **not** re-add a per-class layer
+  cache / static `.layer` accessor; the plain function keeps `Service` consistent with the rest,
+  no static-getter/`this`/`WeakMap` magic). Do **not** make `Layer.class`/`Service`/`fromService`
+  fallible or async — that's `make`'s lane. `Layer.class` injects **any** constructor (incl.
+  third-party); `Service` only a class you author as its subclass — they are complementary, keep
+  both.
 
 ### 8. `Layer.merge` builds in parallel; failure semantics are fixed
 
@@ -152,15 +159,15 @@ short-circuit, throw → Defect, and an N-way merge.)_
 
 The public value surface is grouped into companion objects so a reader can tell a
 Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,class,
-merge,provideTo,collect,onStart,onStop,describe,toDot,build,scoped,forkScope}` and
+fromService,merge,provideTo,collect,onStart,onStop,describe,toDot,build,scoped,forkScope}` and
 `Context.{empty}`. Assembly is single-pass and fully type-checked — graphs are composed by
 hand with `provideTo` / `merge`; there is **no auto-wiring** (see the "no `wire`" note in
 Accepted constraints). `Context` and `Layer` are each **both a
 type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
 `Layer.make(...)`). `Tag` **and `Service`** stay top-level — `Tag` names a service and builds
-neither; `Service` mints a self-injecting service class (a Tag + a `.layer`), so it is a
-class-defining primitive alongside `Tag`, not a `Layer` operation. Do not re-flatten these
-into top-level function exports, and do not move `Service` under `Layer`.
+neither; `Service` mints a self-injecting service class (a Tag; `Layer.fromService` builds its
+layer), so it is a class-defining primitive alongside `Tag`, not a `Layer` operation. Do not
+re-flatten these into top-level function exports, and do not move `Service` under `Layer`.
 
 ### 10. A `BuildState` is threaded through every build (memoization + teardown)
 

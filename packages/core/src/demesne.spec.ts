@@ -164,11 +164,12 @@ describe("Layer.class: constructor injection without a hand-written factory", ()
 });
 
 describe("Service: tag + injection + layer in one declaration", () => {
-  it("injects each dep as a typed field and exposes a buildable `.layer`", async () => {
+  it("injects each dep as a typed field and builds via Layer.fromService", async () => {
     const logs: string[] = [];
     const order: Order = { id: "s-1", total: 7 };
 
-    // One declaration: a Tag, injected `this.logger` / `this.orders`, and `GetOrderSvc.layer`.
+    // One declaration: a Tag with injected `this.logger` / `this.orders`; its layer is
+    // `Layer.fromService(GetOrderSvc)`.
     class GetOrderSvc extends Service<GetOrderSvc>()("SvcGetOrder", {
       logger: LoggerService,
       orders: OrderRepository,
@@ -184,8 +185,9 @@ describe("Service: tag + injection + layer in one declaration", () => {
       findById: (id) => (id === "s-1" ? Ok(order) : Err(new OrderNotFound({ id }))).toAsync(),
     });
 
+    const GetOrderSvcLive = Layer.fromService(GetOrderSvc);
     const ctx = (
-      await Layer.build(Layer.provideTo(GetOrderSvc.layer, Layer.merge(LoggerLive, RepoLive)))
+      await Layer.build(Layer.provideTo(GetOrderSvcLive, Layer.merge(LoggerLive, RepoLive)))
     ).unwrap();
     const found = await ctx.get(GetOrderSvc).run("s-1");
 
@@ -193,10 +195,19 @@ describe("Service: tag + injection + layer in one declaration", () => {
     expect(logs).toEqual(["svc s-1"]);
   });
 
-  it("`.layer` is a stable reference so a shared service builds once", () => {
-    class Widget extends Service<Widget>()("SvcWidget", { logger: LoggerService }) {}
+  it("a Service instance constructs directly from a deps object (framework-free test)", () => {
+    const logs: string[] = [];
+    class Widget extends Service<Widget>()("SvcWidget", { logger: LoggerService }) {
+      greet(): string {
+        this.logger.log("hi");
+        return "ok";
+      }
+    }
 
-    expect(Widget.layer).toBe(Widget.layer);
+    // No container needed to unit-test the logic: hand it a fake deps object.
+    const widget = new Widget({ logger: { log: (m) => logs.push(m) } });
+
+    expect(widget.greet()).toBe("ok");
   });
 });
 

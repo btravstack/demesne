@@ -9,7 +9,7 @@
 import { Layer } from "demesne";
 
 import { CreateTodoLive } from "./application/create-todo.js";
-import { GetTodo } from "./application/get-todo.js";
+import { GetTodoLive } from "./application/get-todo.js";
 import { ListTodosLive } from "./application/list-todos.js";
 import { AuditSinksLive } from "./application/plugins.js";
 import { TodoRepository } from "./application/ports.js";
@@ -21,9 +21,10 @@ import { LoggerLive } from "./infra/logger.js";
 export const bootstrap = <R extends Layer<TodoRepository, unknown, unknown>>(repository: R) => {
   // the audit collection reads Logger (its console sink); discharge that need up front
   const audit = Layer.provideTo(AuditSinksLive, LoggerLive);
-  // the use cases each need Logger + TodoRepository — feed both in. GetTodo is a `Service`, so
-  // its layer is `GetTodo.layer`; the other two are `Layer.class` layers (`*Live`).
-  const useCases = Layer.merge(ListTodosLive, GetTodo.layer, CreateTodoLive);
+  // the use cases each need Logger + TodoRepository — feed both in. GetTodo is a `Service`
+  // (its layer is `Layer.fromService(GetTodo)`, exported as `GetTodoLive`); the other two are
+  // `Layer.class` layers.
+  const useCases = Layer.merge(ListTodosLive, GetTodoLive, CreateTodoLive);
   const useCasesWired = Layer.provideTo(useCases, Layer.merge(LoggerLive, repository));
   // expose Logger, the audit collection, the repository (and whatever else it provides), and
   // the wired use cases; shared layers (LoggerLive, the repository) build once (memoized).

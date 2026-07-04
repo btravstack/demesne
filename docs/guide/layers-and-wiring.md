@@ -73,9 +73,9 @@ const GetOrderLive = Layer.class(GetOrder, [Logger, OrderRepository], GetOrderIn
 //    ^? Layer<GetOrder, never, Logger | OrderRepository>
 ```
 
-**`Service<Self>()(id, { deps })`** — the fused form: **one** declaration is the Tag, the
-injected `this.dep` fields, and a buildable `.layer`. The trade is that the class **extends a
-demesne base** (coupling), for the fewest artifacts.
+**`Service<Self>()(id, { deps })`** — the fused form: **one** declaration is the Tag and the
+injected `this.dep` fields; `Layer.fromService(Cls)` is its layer. The trade is that the class
+**extends a demesne base** (coupling), for the fewest artifacts.
 
 ```ts
 class GetOrder extends Service<GetOrder>()("GetOrder", {
@@ -85,18 +85,21 @@ class GetOrder extends Service<GetOrder>()("GetOrder", {
   execute(id: string) { this.logger.log(id); return this.orders.findById(id); }
 }
 
-const GetOrderLive = GetOrder.layer;
+const GetOrderLive = Layer.fromService(GetOrder);
 //    ^? Layer<GetOrder, never, Logger | OrderRepository>
 const uc = ctx.get(GetOrder); // a GetOrder instance, with `execute`
 ```
 
 Both are infallible (`E = never`); a throwing constructor becomes a `Defect` (like `factory`).
-For a fallible/async build, stay on `Layer.make`. Use `Layer.class` to keep the class free of
-demesne; use `Service` when you want the one-declaration brevity and accept the base class.
+For a fallible/async build, stay on `Layer.make`. Use `Layer.class` to inject **any** class
+(including one you don't own — it just calls `new`); use `Service` when you want the
+one-declaration brevity for a class you author, and accept the base class. `Service` instances
+also construct directly for tests — `new GetOrder({ logger, orders })` needs no container.
 
-::: tip `Service.layer` is one stable reference
-`GetOrder.layer` is memoized per class, so `GetOrder.layer === GetOrder.layer` — feed it into
-the graph freely; the shared layer builds once (see "Shared layers build once" below).
+::: tip Bind the layer to a `const`
+`Layer.fromService(GetOrder)` returns a fresh layer each call, like every constructor — bind it
+to a `const` and reuse that so the shared service builds once (see "Shared layers build once"
+below), rather than calling `Layer.fromService` at each use site.
 :::
 
 ## Qualify at the boundary

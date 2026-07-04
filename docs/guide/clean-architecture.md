@@ -88,9 +88,9 @@ _input_ with its _dependencies_ and couple the application logic to demesne. Kee
 ports in the **constructor** leaves `execute(input)` clean and the interactor
 framework-agnostic — `new GetOrderInteractor(fakeLogger, fakeOrders)` is all you need to
 test it. `Layer.class` is the only seam that knows the tags — and if you'd rather fuse the
-tag, injection and layer into one declaration (accepting a demesne base class), `Service`
+tag and injection into one declaration (accepting a demesne base class), `Service`
 does that: `class GetOrder extends Service<GetOrder>()("GetOrder", { logger: Logger, orders:
-OrderRepository }) { … }`, with `GetOrder.layer` as the layer.
+OrderRepository }) { … }`, with `Layer.fromService(GetOrder)` as the layer.
 :::
 
 ## Adapters

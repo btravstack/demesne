@@ -230,13 +230,14 @@ Layer.class(ConsumerTag, [ServiceA, ServiceC], Consumer);
 // @ts-expect-error - one tag is not enough for a two-parameter constructor.
 Layer.class(ConsumerTag, [ServiceA], Consumer);
 
-// Service: `.layer` has Needs = union of the record's identities, Provides = the instance.
+// Service: `Layer.fromService` has Needs = union of the record's identities, Provides = instance.
 class Widget extends Service<Widget>()("WidgetSvc", { a: ServiceA, b: ServiceB }) {
   ab(): string {
     return `${this.a.a}:${this.b.b}`;
   }
 }
-type _widgetLayer = Expect<Equal<typeof Widget.layer, Layer<Widget, never, ServiceA | ServiceB>>>;
+const widgetLayer = Layer.fromService(Widget);
+type _widgetLayer = Expect<Equal<typeof widgetLayer, Layer<Widget, never, ServiceA | ServiceB>>>;
 
 // The injected fields are typed from the record, and reading the service yields the instance.
 declare const widget: Widget;
