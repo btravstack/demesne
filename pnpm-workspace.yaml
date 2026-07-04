@@ -58,12 +58,15 @@ allowBuilds:
 # Supply-chain maturity delay: don't adopt a freshly published version until it
 # has been on the registry for 7 days (10080 minutes). Strict mode also validates
 # the committed lockfile against this cutoff, so a same-day-published transitive
-# dep fails the check instead of slipping in silently.
+# dep fails the check instead of slipping in silently. Trade-off: a `--frozen-lockfile`
+# CI install can fail if a *locked* dep was (re)published inside the window — mitigated
+# by the exclude list below plus Dependabot's `cooldown` in .github/dependabot.yml.
 minimumReleaseAge: 10080
 minimumReleaseAgeStrict: true
-# `unthrown` is demesne's own peer dependency and ships from the sibling repo on
-# the same cadence; its 1.0.0 is newer than the 7-day window. Exclude it from the
-# maturity delay so the peer resolves, while the delay still guards everything else.
+# `unthrown` is demesne's own peer dependency and ships from the sibling repo on the
+# same cadence; a fresh release (e.g. the current 3.x) can be newer than the 7-day
+# window. Exclude it from the maturity delay so the peer resolves, while the delay
+# still guards everything else. `@btravstack/theme` (docs) is excluded for the same reason.
 minimumReleaseAgeExclude:
   - unthrown
   - "@btravstack/theme"

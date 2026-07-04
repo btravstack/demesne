@@ -247,8 +247,11 @@ rejected.)_
 `onStart(layer, hook)` and `onStop(layer, hook)` attach lifecycle steps **distinct from
 construction**, threaded through the same `BuildState`. `onStart` pushes to `startHooks`; the
 terminals (`build` / `scoped` / `forkScope`) run them via `runStartHooks` **after the whole
-graph is built, before `use`, sequentially, in registration order (FIFO = dependency order,
-since a dependent builds after its deps)**. A start hook is **fallible** — it returns a
+graph is built, before `use`, sequentially, in registration order (construction-completion
+order)**. That is dependency-respecting for a _dependent_ hook (it registers after its deps,
+since the dependent builds later), but **not a total topological sort**: two hooks on
+_independent_ parallel branches (built under `merge`/`collect`) run in a nondeterministic
+relative order. Don't rely on cross-branch start-hook ordering. A start hook is **fallible** — it returns a
 `Result` / `AsyncResult` whose error **unions into the layer's `E`**, and the first `Err`
 short-circuits startup before `use` (the scope still closes). `onStop` pushes a **finalizer**
 (same list as `acquireRelease`, run **LIFO** on scope close) and therefore adds **`Scope`** to
@@ -264,6 +267,33 @@ shutdown to a service built some other way. _(Guarded by the spec: dependency-or
 before `use`, start under plain `build`, failed-hook abort with error union, scope-closes-on-
 failed-hook, LIFO stop order. And the type-level tests: `onStart` unions the hook error and
 keeps `Needs`; `onStop` adds `Scope` so `build` rejects it and `scoped` accepts it.)_
+
+## Accepted constraints (from the expert audit)
+
+Deliberate design choices / known limitations — documented so they aren't rediscovered as
+bugs. The one high-severity finding (`wire` memo poisoning) was **fixed** (see invariant #10);
+the rest are accepted:
+
+- **Custom combinators must infer the whole layer.** A user-written combinator that takes
+  `Layer<P, E, N>` and infers `N` gets `any` — `Needs` is contravariant and degrades. Every
+  built-in decorator (`override`, `onStart`, `onStop`) instead infers `L extends
+Layer<any,any,any>` and pulls channels via `ProvidesOf` / `ErrorOf` / `NeedsOf`. Anyone
+  extending demesne must do the same.
+- **`wire` re-runs deferred builds; keep factories idempotent** (see invariant #10 / roadmap).
+  A factory / `acquire` passed (even transitively) to `wire` must read its deps **before** any
+  side effect, or the effect repeats across deferral rounds (and an `acquire` that opens a
+  resource before a deferred read leaks it).
+- **`override` runs the base provider** (see invariant #13). It cannot swap out a _failing_
+  provider; test against a broken/absent dependency with a `bootstrap(repository)`-style
+  parameterized graph, not `override`.
+- **No manual `Scope` handle.** A scope's lifetime IS the `use` callback of `scoped` /
+  `forkScope`; there is no "open, hold, close later" handle. A long-lived app keeps the `use`
+  promise open until a shutdown signal (see the example's `server.ts`), then teardown runs.
+  Resource lifetimes stay lexically bounded (bracket-style) — deliberate, not Effect's
+  freestanding `Scope.make`.
+- **`unthrown` is a lockstep peer.** demesne re-uses unthrown's `Result` / `AsyncResult` and
+  never re-implements them; the `peerDependencies` range (`^3`) tracks unthrown's major, so a
+  breaking unthrown release requires a matching demesne major.
 
 ## Roadmap — ideas from the wider DI ecosystem
 

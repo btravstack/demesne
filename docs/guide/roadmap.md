@@ -153,7 +153,9 @@ Notes:
 
 - **`onStart` runs after construction, in dependency order.** Hooks run once the whole
   graph is built (a dependent's hook after its dependencies'), **sequentially**, before
-  `use`. They run under `Layer.build` too, not only `scoped`.
+  `use`. They run under `Layer.build` too, not only `scoped`. (Order is
+  construction-completion order — dependency-respecting, but two hooks on _independent_
+  branches have no guaranteed relative order.)
 - **A failed start hook aborts startup.** `onStart`'s hook returns a `Result` /
   `AsyncResult`; its error **unions into the layer's `E`**, and the first failure
   short-circuits before `use` — but the scope still closes (releasing whatever was
