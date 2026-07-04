@@ -29,12 +29,13 @@
   },
   "files": [
     "dist",
-    "docs"
+    "src/index.ts"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
+  "types": "./dist/index.d.cts",
   "exports": {
     ".": {
       "import": {
@@ -51,16 +52,19 @@
   "scripts": {
     "build": "tsdown src/index.ts --format cjs,esm --dts --clean",
     "build:docs": "typedoc",
+    "check:package": "publint --strict && attw --pack .",
     "dev": "tsdown src/index.ts --format cjs,esm --dts --watch",
     "test": "vitest run",
     "test:types": "tsc --noEmit -p tsconfig.test-d.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test-d.json"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
     "@demesne/tsconfig": "workspace:*",
     "@demesne/typedoc": "workspace:*",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "publint": "catalog:",
     "tsdown": "catalog:",
     "typedoc": "catalog:",
     "typedoc-plugin-markdown": "catalog:",

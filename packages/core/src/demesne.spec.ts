@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type Context, Layer, Tag } from "./index.js";
 import {
@@ -233,6 +233,21 @@ describe("internals: defensive runtime guards", () => {
     const ctx = (await Layer.build(Layer.value(LoggerService, { log: () => {} }))).unwrap();
     const phantom = (ctx as unknown as { _R: (r: unknown) => void })._R;
     expect(phantom(undefined)).toBeUndefined();
+  });
+
+  it("warns when two distinct tags share an id (they would collide in the context)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      class DupA extends Tag("DuplicateIdGuard")<DupA, { readonly a: string }>() {}
+      class DupB extends Tag("DuplicateIdGuard")<DupB, { readonly b: number }>() {}
+      void DupA;
+      void DupB;
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('duplicate Tag id "DuplicateIdGuard"'),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

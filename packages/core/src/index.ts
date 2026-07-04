@@ -42,9 +42,23 @@ export interface TagClass<Self, Id extends string, Service> extends Tag<Self, Se
   readonly key: Id;
 }
 
+// Guard against the one runtime-unsound corner of the nominal-tag scheme: two DISTINCT tag
+// classes that share an `Id` are distinct *types* but the same runtime map key (`tag.key`),
+// so in a Context one silently reads the other's service. Ids must be globally unique. We
+// warn (not throw — a latent duplicate shouldn't crash) the first time an id repeats.
+const seenTagIds = new Set<string>();
+
 export const Tag =
   <const Id extends string>(id: Id) =>
   <Self, Service>(): TagClass<Self, Id, Service> => {
+    if (seenTagIds.has(id)) {
+      console.warn(
+        `demesne: duplicate Tag id ${JSON.stringify(id)} — tag ids must be unique, or two ` +
+          `tags collide in the Context and one reads the other's service.`,
+      );
+    } else {
+      seenTagIds.add(id);
+    }
     const cls = class {
       static readonly [TagTypeId] = TagTypeId;
       static readonly key = id;

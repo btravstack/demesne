@@ -56,7 +56,11 @@ Two structurally identical services must never collide in `R`. A `Tag` is create
 from a class plus a literal `Id` string; the constructor returns a distinct
 `TagInstance<Id, Service>` (**not** `Self`) so that `class X extends Tag("X")<X, S>()`
 is legal without the class referencing itself as a base type. The literal `Id` keeps
-instance types nominal. _(Guarded by: reading an absent tag is a compile error.)_
+instance types nominal. The one runtime-unsound corner is **duplicate ids**: two distinct
+tag classes sharing an `Id` are distinct types but the same runtime map key, so one silently
+reads the other's service — `Tag` therefore **warns** (once per id, never throws) when an id
+repeats. Ids must be globally unique. _(Guarded by: reading an absent tag is a compile error;
+the spec asserts the duplicate-id warning.)_
 
 **Definition convention — inline the shape; the class IS the tag.** Prefer a single
 declaration with the service shape inlined over a separate `interface` + short tag
