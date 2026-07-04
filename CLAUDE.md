@@ -152,7 +152,7 @@ short-circuit, throw → Defect, and an N-way merge.)_
 
 The public value surface is grouped into companion objects so a reader can tell a
 Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,class,
-merge,provideTo,collect,onStart,onStop,build,scoped,forkScope}` and
+merge,provideTo,collect,onStart,onStop,describe,toDot,build,scoped,forkScope}` and
 `Context.{empty}`. Assembly is single-pass and fully type-checked — graphs are composed by
 hand with `provideTo` / `merge`; there is **no auto-wiring** (see the "no `wire`" note in
 Accepted constraints). `Context` and `Layer` are each **both a
@@ -263,6 +263,27 @@ before `use`, start under plain `build`, failed-hook abort with error union, sco
 failed-hook, LIFO stop order. And the type-level tests: `onStart` unions the hook error and
 keeps `Needs`; `onStop` adds `Scope` so `build` rejects it and `scoped` accepts it.)_
 
+### 15. Graph introspection reads recorded structure, never a build
+
+`Layer.describe(root)` walks an optional, per-layer **`meta: LayerMeta`** (recorded by every
+constructor / combinator — the one thing besides `build` on a `Layer`) into a normalized
+`{ nodes, edges }` model; `Layer.toDot` renders it as Graphviz DOT. It is a **read-only
+diagnostic — no factory ever runs** (so it is safe on `acquireRelease` graphs; it reflects the
+composed _structure_, not a live build). `meta` is **optional** so a hand-built `{ build }`
+layer still satisfies `Layer` — such a layer is **opaque** (contributes nothing), and `meta` is
+**never read during a build**. The honesty of the graph is two-tier and must stay documented:
+edges are **exact** for `value` / `class` / `Service` (their `needs` keys are known at runtime)
+and **inferred** (`edge.inferred = true`, dashed in DOT) for `factory` / `make` /
+`acquireRelease` / `member`, whose per-service `needs` live only in the **erased** `Needs`
+type — their edges are reconstructed from the enclosing `provideTo` composition (what they were
+fed), which is exact about the _wiring_ but may **over-approximate usage**. Do **not** claim a
+precise graph for the erased-needs constructors, and do **not** make introspection run the
+graph to recover their needs (that would re-introduce runtime resolution / side effects — the
+`wire` mistake). _(Guarded by the spec: exact-vs-inferred edges on a mixed graph, DOT styling
+of resources / collections / inferred edges, see-through of `onStart` / `onStop`, and an opaque
+hand-built layer contributing nothing. And the type-level tests: `describe` → `LayerGraph`,
+`toDot` → `string`, both accepting any layer.)_
+
 ## Accepted constraints (design choices)
 
 Deliberate design choices, documented so they aren't rediscovered as bugs:
@@ -296,18 +317,15 @@ Deliberate design choices, documented so they aren't rediscovered as bugs:
 
 ## Roadmap — ideas from the wider DI ecosystem
 
-The wiring core is complete. Three roadmap items are **now implemented**: `Layer.forkScope`
-(request / child scopes, see invariant #12); `Layer.member` / `Layer.collect` (multi-bindings,
-see invariant #13); and `Layer.onStart` / `Layer.onStop` (lifecycle hooks, see invariant #14).
-`Layer.wire` (automatic assembly) and `Layer.override` (deep test override) were implemented
-and then **removed** — they were the only parts that resolved at runtime, which is inherently
-at odds with the "everything discharged before you run" thesis (see Accepted constraints).
-Remaining future work, borrowed selectively from mature DI systems **without** violating the
-thesis:
-
-1. **Graph introspection / DOT export** (from fx, Dagger) — a debugging aid. A read-only
-   diagnostic; since assembly is hand-threaded `provideTo` / `merge`, a truthful graph would
-   walk the composed `Layer` structure at runtime (types are erased).
+The wiring core is complete. Roadmap items **now implemented**: `Layer.forkScope` (request /
+child scopes, see invariant #12); `Layer.member` / `Layer.collect` (multi-bindings, see
+invariant #13); `Layer.onStart` / `Layer.onStop` (lifecycle hooks, see invariant #14);
+`Layer.class` / `Service` (constructor-injection sugar, see invariant #7); and **graph
+introspection** — `Layer.describe` / `Layer.toDot` (see invariant #15). `Layer.wire` (automatic
+assembly) and `Layer.override` (deep test override) were implemented and then **removed** —
+they were the only parts that resolved at runtime, which is inherently at odds with the
+"everything discharged before you run" thesis (see Accepted constraints). No further roadmap
+items are outstanding; new work should be justified against the thesis.
 
 Already solved elegantly, document it as the answer: **assisted injection**
 (injected deps + call-time args) is the constructor-injected use-case pattern

@@ -140,7 +140,29 @@ export interface Layer<Provides, E = never, Needs = never> {
   // strict contravariance in `Needs`, so a missing dependency is a real error.
   // The `BuildState` (memoization + finalizers) is threaded through every build.
   readonly build: (ctx: Context<Needs>, state: BuildState) => AsyncResult<Context<Provides>, E>;
+  // Optional structural metadata for graph introspection (`Layer.describe` / `Layer.toDot`).
+  // Optional so a hand-built `{ build }` layer still satisfies `Layer` (it shows as opaque).
+  // Never read during a build — a pure debugging aid.
+  readonly meta?: LayerMeta;
 }
+
+// The shape each combinator records for `Layer.describe` / `Layer.toDot`. `needs` is the set of
+// service keys a node reads WHEN KNOWN AT RUNTIME — `value` (none), `class` / `service` (the
+// dep list). It is `undefined` for `factory` / `make` / `acquireRelease` / `member`, whose
+// per-service requirements live only in the erased `Needs` type; their edges are INFERRED from
+// the `provideTo` composition instead (what they were fed), which is exact about the wiring
+// though it may over-approximate actual usage.
+export type LayerMeta =
+  | {
+      readonly kind: "value" | "factory" | "make" | "acquireRelease" | "member";
+      readonly key: string;
+      readonly needs?: readonly string[];
+    }
+  | { readonly kind: "class" | "service"; readonly key: string; readonly needs: readonly string[] }
+  | { readonly kind: "collect"; readonly key: string; readonly members: readonly Layer<any, any, any>[] }
+  | { readonly kind: "merge"; readonly children: readonly Layer<any, any, any>[] }
+  | { readonly kind: "provideTo"; readonly self: Layer<any, any, any>; readonly dep: Layer<any, any, any> }
+  | { readonly kind: "onStart" | "onStop"; readonly child: Layer<any, any, any> };
 
 // ---------------------------------------------------------------------------
 // Scope — a phantom requirement tracked in the `Needs` channel (à la Effect's
@@ -220,6 +242,7 @@ const value = <Self, Service>(
   service: Service,
 ): Layer<Self, never, never> => ({
   build: () => Ok(unsafeAdd(emptyAny(), tag.key, service)).toAsync(),
+  meta: { kind: "value", key: tag.key, needs: [] },
 });
 
 // A layer built synchronously and infallibly from the context. `f` runs inside `.map`, so a
@@ -231,6 +254,7 @@ const factory = <Self, Service, Needs = never>(
   f: (ctx: Context<Needs>) => Service,
 ): Layer<Self, never, Needs> => ({
   build: (ctx) => Ok<void>(undefined).toAsync().map(() => unsafeAdd(emptyAny(), tag.key, f(ctx))),
+  meta: { kind: "factory", key: tag.key },
 });
 
 // A layer whose construction may FAIL and/or be ASYNC: the factory returns a
@@ -246,6 +270,7 @@ const make = <Self, Service, E, Needs = never>(
       .toAsync()
       .flatMap(() => f(ctx))
       .map((service) => unsafeAdd(emptyAny(), tag.key, service)),
+  meta: { kind: "make", key: tag.key },
 });
 
 // A layer that ACQUIRES a resource and registers its RELEASE with the scope. It
@@ -267,6 +292,7 @@ const acquireRelease = <Self, Service, E, Needs = never>(
         });
         return unsafeAdd(emptyAny(), tag.key, service);
       }),
+  meta: { kind: "acquireRelease", key: tag.key },
 });
 
 // Attach a START hook to a layer: a post-construction step (a migration, a warmup, a
@@ -287,6 +313,7 @@ const onStart = <L extends Layer<any, any, any>, E2>(
       );
       return provided;
     }),
+  meta: { kind: "onStart", child: layer },
 });
 
 // Attach a STOP hook to a layer: a teardown for an already-provided service (a graceful
@@ -306,6 +333,7 @@ const onStop = <L extends Layer<any, any, any>>(
       });
       return provided;
     }),
+  meta: { kind: "onStop", child: layer },
 });
 
 // A single contribution to a COLLECTION tag — a tag whose service is a `readonly Item[]`.
@@ -322,6 +350,7 @@ const member = <Self, Item, Needs = never>(
     Ok<void>(undefined)
       .toAsync()
       .map(() => unsafeAdd(emptyAny(), collectionTag.key, [f(ctx)] as readonly Item[])),
+  meta: { kind: "member", key: collectionTag.key },
 });
 
 // The constructor-argument tuple a dependency-tag list induces (each tag → its service),
@@ -350,6 +379,11 @@ const classLayer = <Self, Instance, const D extends readonly Tag<any, any>[]>(
         const args = (deps as readonly Tag<any, any>[]).map((d) => (ctx as Context<any>).get(d));
         return unsafeAdd(emptyAny(), tag.key, new ctor(...(args as DepServices<D>)));
       }),
+  meta: {
+    kind: "class",
+    key: tag.key,
+    needs: (deps as readonly Tag<any, any>[]).map((d) => d.key),
+  },
 });
 
 // The injected instance shape a deps RECORD induces (each field → its tag's service), and the
@@ -409,6 +443,11 @@ export const Service =
                 }
                 return unsafeAdd(emptyAny(), id, new Ctor(injected as InjectedOf<R>));
               }),
+          meta: {
+            kind: "service",
+            key: id,
+            needs: Object.values(deps).map((t) => (t as Tag<any, any>).key),
+          },
         };
         serviceLayers.set(this, layer);
         return layer;
@@ -437,6 +476,7 @@ const merge = <Ls extends readonly [Layer<any, any, any>, ...Layer<any, any, any
     ).map((contexts) =>
       (contexts as Context<any>[]).reduce((merged, c) => mergeContext(merged, c), emptyAny()),
     ),
+  meta: { kind: "merge", children: layers as readonly Layer<any, any, any>[] },
 });
 
 // Feed `dep` into `self`, discharging the requirements `self` shares with what
@@ -450,6 +490,7 @@ const provideTo = <P, E, N, P2, E2, N2>(
     buildMemo(dep, ctx as Context<any>, state).flatMap((depCtx) =>
       buildMemo(self, mergeContext(ctx, depCtx) as Context<N>, state),
     ),
+  meta: { kind: "provideTo", self, dep },
 });
 
 // Accumulate several contributions to one COLLECTION tag into a single `readonly Item[]`
@@ -475,7 +516,132 @@ const collect = <Self, Item, Ms extends readonly Layer<Self, any, any>[]>(
       }
       return unsafeAdd(emptyAny(), collectionTag.key, items as readonly Item[]);
     }),
+  meta: {
+    kind: "collect",
+    key: collectionTag.key,
+    members: members as readonly Layer<any, any, any>[],
+  },
 });
+
+// ---------------------------------------------------------------------------
+// Graph introspection — a read-only debugging aid. `describe` walks the recorded
+// structural `meta` (see `LayerMeta`) into a normalized node/edge model; `toDot`
+// renders it as Graphviz DOT. NO factories run — this reflects the composed STRUCTURE,
+// not a live build. Edges are EXACT for value / class / Service (needs known at runtime)
+// and INFERRED from the `provideTo` composition for factory / make / acquireRelease /
+// member (whose per-service needs are erased) — the inferred edges show the wiring, and may
+// over-approximate usage. A hand-built `{ build }` layer (no meta) contributes nothing.
+// ---------------------------------------------------------------------------
+export interface GraphNode {
+  readonly key: string;
+  readonly kind: LayerMeta["kind"];
+}
+export interface GraphEdge {
+  readonly from: string;
+  readonly to: string;
+  readonly inferred: boolean; // true = from provideTo composition (usage over-approximated)
+}
+export interface LayerGraph {
+  readonly nodes: readonly GraphNode[];
+  readonly edges: readonly GraphEdge[];
+}
+
+// The service keys a layer EXPOSES at its root (provideTo consumes its `dep`, so only `self`).
+const providedKeys = (layer: Layer<any, any, any>): string[] => {
+  const m = layer.meta;
+  if (m === undefined) return [];
+  switch (m.kind) {
+    case "merge":
+      return m.children.flatMap(providedKeys);
+    case "provideTo":
+      return providedKeys(m.self);
+    case "onStart":
+    case "onStop":
+      return providedKeys(m.child);
+    default:
+      return [m.key];
+  }
+};
+
+const describe = (root: Layer<any, any, any>): LayerGraph => {
+  // 1. Collect every provider node (key → { kind, needs }) and every provideTo relation.
+  const providers = new Map<
+    string,
+    { kind: LayerMeta["kind"]; needs: readonly string[] | undefined }
+  >();
+  const relations: { selfKeys: string[]; depKeys: string[] }[] = [];
+  const walk = (layer: Layer<any, any, any>): void => {
+    const m = layer.meta;
+    if (m === undefined) return;
+    switch (m.kind) {
+      case "merge":
+        m.children.forEach(walk);
+        break;
+      case "provideTo":
+        relations.push({ selfKeys: providedKeys(m.self), depKeys: providedKeys(m.dep) });
+        walk(m.self);
+        walk(m.dep);
+        break;
+      case "collect":
+        if (!providers.has(m.key)) providers.set(m.key, { kind: "collect", needs: undefined });
+        m.members.forEach(walk);
+        break;
+      case "onStart":
+      case "onStop":
+        walk(m.child);
+        break;
+      default:
+        // a single-provider leaf; a repeated key (e.g. a collection member) keeps the first.
+        if (!providers.has(m.key)) providers.set(m.key, { kind: m.kind, needs: m.needs });
+        break;
+    }
+  };
+  walk(root);
+
+  // 2. Edges: EXACT from known needs; INFERRED from provideTo for unknown-needs providers.
+  const seen = new Set<string>();
+  const edges: GraphEdge[] = [];
+  const add = (from: string, to: string, inferred: boolean): void => {
+    const id = `${from} ${to}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    edges.push({ from, to, inferred });
+  };
+  for (const [key, info] of providers) {
+    if (info.needs !== undefined) for (const n of info.needs) add(key, n, false);
+  }
+  for (const { selfKeys, depKeys } of relations) {
+    for (const sk of selfKeys) {
+      const info = providers.get(sk);
+      if (info !== undefined && info.needs === undefined) {
+        for (const dk of depKeys) add(sk, dk, true);
+      }
+    }
+  }
+
+  // 3. Deterministic ordering for stable output.
+  const nodes: GraphNode[] = [...providers.entries()]
+    .map(([key, info]) => ({ key, kind: info.kind }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+  edges.sort((a, b) => `${a.from} ${a.to}`.localeCompare(`${b.from} ${b.to}`));
+  return { nodes, edges };
+};
+
+// Render the graph as Graphviz DOT. Resource nodes (acquireRelease) are dashed boxes,
+// collections are boxes, and inferred edges (usage over-approximated) are dashed.
+const toDot = (root: Layer<any, any, any>, name = "demesne"): string => {
+  const { nodes, edges } = describe(root);
+  const quote = (s: string): string => JSON.stringify(s);
+  const style = (kind: LayerMeta["kind"]): string =>
+    kind === "acquireRelease" ? " [shape=box, style=dashed]" : kind === "collect" ? " [shape=box]" : "";
+  const lines = [`digraph ${quote(name)} {`];
+  for (const n of nodes) lines.push(`  ${quote(n.key)}${style(n.kind)};`);
+  for (const e of edges) {
+    lines.push(`  ${quote(e.from)} -> ${quote(e.to)}${e.inferred ? " [style=dashed]" : ""};`);
+  }
+  lines.push("}");
+  return lines.join("\n");
+};
 
 // Build a fully-wired layer. Callable once `Needs` is `never` — a graph that still
 // needs a `Scope` (contains `acquireRelease` layers) is a COMPILE error here; use
@@ -551,8 +717,9 @@ const forkScope = <Parent, ReqP, E, A, E2>(
 export const Context = { empty };
 
 // Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member` / `class`),
-// combinators (`merge` / `provideTo` / `collect` / `onStart` / `onStop`), and the terminals
-// `build` / `scoped` / `forkScope`. `class` is constructor-injection sugar over `factory`; the
+// combinators (`merge` / `provideTo` / `collect` / `onStart` / `onStop`), the introspection
+// aids (`describe` / `toDot`), and the terminals `build` / `scoped` / `forkScope`. `class` is
+// constructor-injection sugar over `factory`; the
 // fused `Service` base (a Tag + `.layer`) is exported top-level, alongside `Tag`. Assembly is
 // single-pass and fully type-checked: you compose a graph by hand with `provideTo` / `merge`
 // (there is no runtime auto-wiring).
@@ -568,6 +735,8 @@ export const Layer = {
   collect,
   onStart,
   onStop,
+  describe,
+  toDot,
   build,
   scoped,
   forkScope,

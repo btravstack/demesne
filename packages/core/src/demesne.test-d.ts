@@ -9,7 +9,15 @@
 // error channel is the real union, `Context` is contravariant, scopes are enforced,
 // and the combinators (`merge` / `collect` / lifecycle hooks) compute every channel exactly.
 
-import { type Context, Layer, type Scope, Service, type ServiceOf, Tag } from "./index.js";
+import {
+  type Context,
+  Layer,
+  type LayerGraph,
+  type Scope,
+  Service,
+  type ServiceOf,
+  Tag,
+} from "./index.js";
 import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
 
 // --- assertion helpers -------------------------------------------------------
@@ -236,3 +244,12 @@ type _widgetA = Expect<Equal<typeof widget.a, { readonly a: string }>>;
 declare const ctxWidget: Context<Widget>;
 const gotWidget = ctxWidget.get(Widget);
 type _gotWidget = Expect<Equal<typeof gotWidget, Widget>>;
+
+// --- 10. Layer.describe + Layer.toDot: graph introspection ------------------
+
+// Introspection accepts any layer regardless of channels and returns a concrete model.
+declare const anyLayer: Layer<ServiceA, EA, ServiceB>;
+const describedGraph = Layer.describe(anyLayer);
+type _describedGraph = Expect<Equal<typeof describedGraph, LayerGraph>>;
+const describedDot = Layer.toDot(anyLayer);
+type _describedDot = Expect<Equal<typeof describedDot, string>>;

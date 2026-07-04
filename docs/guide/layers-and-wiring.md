@@ -273,3 +273,34 @@ const result = await Layer.scoped(PoolLive, (ctx) => useThePool(ctx.get(Pool)));
 `acquireRelease` puts a phantom `Scope` in the layer's requirements, so `Layer.build`
 **rejects a resource graph at compile time** — you're forced to use `Layer.scoped`.
 Full details in [Resources & Scopes](./roadmap).
+
+## Introspection: `Layer.describe` / `Layer.toDot`
+
+Because you compose the graph by hand, it helps to _see_ it. `Layer.describe(root)` walks the
+composed layer into a `{ nodes, edges }` model, and `Layer.toDot(root)` renders that as
+[Graphviz](https://graphviz.org/) DOT. It is a **read-only** aid — **no factory runs**, so it's
+safe even on `acquireRelease` graphs; it reflects the composed structure, not a live build.
+
+```ts
+console.log(Layer.toDot(AppLayer));
+// digraph "demesne" {
+//   "AppConfig";
+//   "Database";
+//   "GetOrder";
+//   "Logger";
+//   "OrderRepository";
+//   "GetOrder" -> "Logger";
+//   "GetOrder" -> "OrderRepository";
+//   "OrderRepository" -> "Database" [style=dashed];
+//   "Database" -> "AppConfig" [style=dashed];
+// }
+```
+
+::: warning Exact vs. inferred edges
+Edges are **exact** for `value` / `class` / `Service` — their dependency keys are known at
+runtime. For `factory` / `make` / `acquireRelease` / `member`, the per-service `Needs` live only
+in the (erased) type, so their edges are **inferred from the `provideTo` composition** — what
+they were fed. Inferred edges (`edge.inferred === true`) render **dashed**; they're exact about
+the wiring but may over-approximate actual usage. A hand-built `{ build }` layer with no
+metadata is opaque and contributes nothing. Pipe the output to `dot -Tsvg` to render it.
+:::

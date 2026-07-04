@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type Context, Layer, Service, Tag } from "./index.js";
+import { Context, Layer, Service, Tag } from "./index.js";
 import {
   type AsyncResult,
   Err,
@@ -197,6 +197,129 @@ describe("Service: tag + injection + layer in one declaration", () => {
     class Widget extends Service<Widget>()("SvcWidget", { logger: LoggerService }) {}
 
     expect(Widget.layer).toBe(Widget.layer);
+  });
+});
+
+describe("Layer.describe + Layer.toDot: graph introspection", () => {
+  it("models the graph — exact edges for class/value, inferred from provideTo for factory/make", () => {
+    class GraphInteractor {
+      constructor(
+        readonly logger: ServiceOf<typeof LoggerService>,
+        readonly orders: ServiceOf<typeof OrderRepository>,
+      ) {}
+    }
+    class GraphGetOrder extends Tag("GraphGetOrder")<GraphGetOrder, GraphInteractor>() {}
+
+    const LoggerLive = Layer.value(LoggerService, { log: () => {} });
+    const ConfigLive = Layer.make(
+      AppConfig,
+      (): Result<ServiceOf<typeof AppConfig>, never> => Ok({ dbUrl: "x" }),
+    );
+    const DatabaseLive = Layer.make(
+      DatabaseService,
+      (ctx: Context<AppConfig>): Result<ServiceOf<typeof DatabaseService>, never> => {
+        void ctx;
+        return Ok({ query: () => [] });
+      },
+    );
+    const OrderRepoLive = Layer.factory(OrderRepository, (ctx: Context<DatabaseService>) => {
+      void ctx.get(DatabaseService);
+      return { findById: (id: string) => Err(new OrderNotFound({ id })).toAsync() };
+    });
+    const GetOrderLive = Layer.class(
+      GraphGetOrder,
+      [LoggerService, OrderRepository],
+      GraphInteractor,
+    );
+
+    const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
+    const RepoWired = Layer.provideTo(OrderRepoLive, DatabaseWired);
+    const root = Layer.provideTo(GetOrderLive, Layer.merge(LoggerLive, RepoWired));
+
+    // one entity: the whole normalized graph. class/value needs are exact; the factory's and
+    // make's needs are erased, so their edges are inferred from the provideTo composition.
+    expect(Layer.describe(root)).toEqual({
+      nodes: [
+        { key: "AppConfig", kind: "make" },
+        { key: "DatabaseService", kind: "make" },
+        { key: "GraphGetOrder", kind: "class" },
+        { key: "LoggerService", kind: "value" },
+        { key: "OrderRepository", kind: "factory" },
+      ],
+      edges: [
+        { from: "DatabaseService", to: "AppConfig", inferred: true },
+        { from: "GraphGetOrder", to: "LoggerService", inferred: false },
+        { from: "GraphGetOrder", to: "OrderRepository", inferred: false },
+        { from: "OrderRepository", to: "DatabaseService", inferred: true },
+      ],
+    });
+
+    // the DOT of the same graph: plain nodes, exact edges solid, inferred edges dashed.
+    expect(Layer.toDot(root)).toBe(
+      [
+        `digraph "demesne" {`,
+        `  "AppConfig";`,
+        `  "DatabaseService";`,
+        `  "GraphGetOrder";`,
+        `  "LoggerService";`,
+        `  "OrderRepository";`,
+        `  "DatabaseService" -> "AppConfig" [style=dashed];`,
+        `  "GraphGetOrder" -> "LoggerService";`,
+        `  "GraphGetOrder" -> "OrderRepository";`,
+        `  "OrderRepository" -> "DatabaseService" [style=dashed];`,
+        `}`,
+      ].join("\n"),
+    );
+  });
+
+  it("sees through onStart / onStop wrappers", () => {
+    class GraphWrapped extends Tag("GraphWrapped")<GraphWrapped, { readonly v: number }>() {}
+    const Base = Layer.value(LoggerService, { log: () => {} });
+    const Inner = Layer.factory(GraphWrapped, (ctx: Context<LoggerService>) => {
+      void ctx.get(LoggerService);
+      return { v: 1 };
+    });
+    const Stopped = Layer.onStop(
+      Layer.onStart(Inner, (): Result<void, never> => Ok(undefined)),
+      () => {},
+    );
+    // provideTo so both `walk` and `providedKeys` traverse the onStart/onStop wrappers.
+    const root = Layer.provideTo(Stopped, Base);
+
+    expect(Layer.describe(root)).toEqual({
+      nodes: [
+        { key: "GraphWrapped", kind: "factory" },
+        { key: "LoggerService", kind: "value" },
+      ],
+      edges: [{ from: "GraphWrapped", to: "LoggerService", inferred: true }],
+    });
+  });
+
+  it("renders DOT — inferred edges dashed, resources/collections boxed, opaque layers skipped", () => {
+    class GraphConn extends Tag("GraphConn")<GraphConn, { readonly c: number }>() {}
+    class GraphPlugins extends Tag("GraphPlugins")<GraphPlugins, readonly number[]>() {}
+
+    const ResourceLive = Layer.acquireRelease(
+      GraphConn,
+      (): Result<{ readonly c: number }, never> => Ok({ c: 1 }),
+      () => {},
+    );
+    const Plugins = Layer.collect(GraphPlugins, [Layer.member(GraphPlugins, () => 1)]);
+    // a hand-built layer carries no `meta`, so it contributes nothing to the graph.
+    const opaque = {
+      build: () => Ok(Context.empty()).toAsync(),
+    } as unknown as Layer<unknown, unknown, unknown>;
+
+    const dot = Layer.toDot(Layer.merge(ResourceLive, Plugins, opaque));
+
+    expect(dot).toBe(
+      [
+        `digraph "demesne" {`,
+        `  "GraphConn" [shape=box, style=dashed];`,
+        `  "GraphPlugins" [shape=box];`,
+        `}`,
+      ].join("\n"),
+    );
   });
 });
 
