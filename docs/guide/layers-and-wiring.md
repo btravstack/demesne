@@ -47,6 +47,58 @@ Annotate only to **declare a failure the body doesn't currently produce** (a pat
 returns only `Ok` today but is contractually fallible — inference would give
 `E = never`), or for a `throw`-only body.
 
+### Constructor injection: `Layer.class` and `Service`
+
+Most services are a class built from ports. Writing the factory by hand
+(`ctx => new UseCase(ctx.get(A), ctx.get(B))`) is boilerplate — two sugars over `factory` let
+demesne **do the instantiation** for you, with the deps type-checked against the constructor.
+This is the `asClass` (Awilix) / `Effect.Service` ergonomic, kept fully compile-time-safe.
+
+**`Layer.class(tag, [deps], Ctor)`** — construct a **plain** class from a tag list. The class
+never imports demesne; the list is checked against the constructor (wrong order / type / arity
+is a compile error), and its tags become the layer's `Needs`.
+
+```ts
+class GetOrderInteractor {
+  constructor(
+    private readonly logger: ServiceOf<Logger>,
+    private readonly orders: ServiceOf<OrderRepository>,
+  ) {}
+  execute(id: string) { this.logger.log(id); return this.orders.findById(id); }
+}
+class GetOrder extends Tag("GetOrder")<GetOrder, GetOrderInteractor>() {}
+
+// no factory, no `ctx.get` — the list drives `new GetOrderInteractor(logger, orders)`
+const GetOrderLive = Layer.class(GetOrder, [Logger, OrderRepository], GetOrderInteractor);
+//    ^? Layer<GetOrder, never, Logger | OrderRepository>
+```
+
+**`Service<Self>()(id, { deps })`** — the fused form: **one** declaration is the Tag, the
+injected `this.dep` fields, and a buildable `.layer`. The trade is that the class **extends a
+demesne base** (coupling), for the fewest artifacts.
+
+```ts
+class GetOrder extends Service<GetOrder>()("GetOrder", {
+  logger: Logger,
+  orders: OrderRepository,
+}) {
+  execute(id: string) { this.logger.log(id); return this.orders.findById(id); }
+}
+
+const GetOrderLive = GetOrder.layer;
+//    ^? Layer<GetOrder, never, Logger | OrderRepository>
+const uc = ctx.get(GetOrder); // a GetOrder instance, with `execute`
+```
+
+Both are infallible (`E = never`); a throwing constructor becomes a `Defect` (like `factory`).
+For a fallible/async build, stay on `Layer.make`. Use `Layer.class` to keep the class free of
+demesne; use `Service` when you want the one-declaration brevity and accept the base class.
+
+::: tip `Service.layer` is one stable reference
+`GetOrder.layer` is memoized per class, so `GetOrder.layer === GetOrder.layer` — feed it into
+the graph freely; the shared layer builds once (see "Shared layers build once" below).
+:::
+
 ## Qualify at the boundary
 
 Async / fallible work enters **only** through `Layer.make`. A raw `Promise` must never

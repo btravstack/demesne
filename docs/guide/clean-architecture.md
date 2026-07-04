@@ -50,17 +50,18 @@ export class OrderRepository extends Tag("OrderRepository")<OrderRepository, {
 
 A use case, **wired by demesne**. The implementation is a class with constructor-injected
 ports and a single public `execute` method — it uses no demesne types, so its signature
-says only what it asks for and returns. A `Layer.factory` performs the constructor
-injection, so the use case joins the typed graph: `Layer.build` won't compile until its
-ports are wired, and the rest of the app resolves it with `ctx.get(GetOrder)`.
+says only what it asks for and returns. `Layer.class` performs the constructor injection from
+a **deps list** — no hand-written factory — so the use case joins the typed graph:
+`Layer.build` won't compile until its ports are wired, and the rest of the app resolves it with
+`ctx.get(GetOrder)`.
 
 ```ts
 // application/get-order.ts
-import { type Context, Layer, type ServiceOf, Tag } from "demesne";
+import { Layer, type ServiceOf, Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 import { Logger, OrderRepository } from "./ports.js";
 
-// The use case logic — constructor DI, one public method, framework-agnostic.
+// The use case logic — constructor DI, one public method, framework-agnostic (no demesne).
 class GetOrderInteractor {
   constructor(
     private readonly logger: ServiceOf<Logger>,
@@ -76,12 +77,9 @@ class GetOrderInteractor {
 // The use case as a port other code resolves from the context.
 export class GetOrder extends Tag("GetOrder")<GetOrder, GetOrderInteractor>() {}
 
-// The application layer: constructor injection performed inside a factory.
-export const GetOrderLive = Layer.factory(
-  GetOrder,
-  (ctx: Context<Logger | OrderRepository>) =>
-    new GetOrderInteractor(ctx.get(Logger), ctx.get(OrderRepository)),
-);
+// The application layer: demesne constructs `new GetOrderInteractor(logger, orders)` for you;
+// the tag list is checked against the constructor, its identities become the layer's Needs.
+export const GetOrderLive = Layer.class(GetOrder, [Logger, OrderRepository], GetOrderInteractor);
 ```
 
 ::: tip Constructor injection, not a `Context` argument
@@ -89,7 +87,10 @@ Taking `ctx: Context<…>` as a first argument of `execute` would mix the use ca
 _input_ with its _dependencies_ and couple the application logic to demesne. Keeping the
 ports in the **constructor** leaves `execute(input)` clean and the interactor
 framework-agnostic — `new GetOrderInteractor(fakeLogger, fakeOrders)` is all you need to
-test it. The `Layer.factory` is the only seam that knows about the `Context`.
+test it. `Layer.class` is the only seam that knows the tags — and if you'd rather fuse the
+tag, injection and layer into one declaration (accepting a demesne base class), `Service`
+does that: `class GetOrder extends Service<GetOrder>()("GetOrder", { logger: Logger, orders:
+OrderRepository }) { … }`, with `GetOrder.layer` as the layer.
 :::
 
 ## Adapters

@@ -114,13 +114,31 @@ Re-enter the typed world at the boundary with `fromPromise` / `fromSafePromise`.
 
 ### 7. The constructor family stays distinct
 
-Three constructors, by construction qualification — do **not** collapse them into a
-single value-or-function overload:
+Three **primitive** constructors, by construction qualification — do **not** collapse them
+into a single value-or-function overload:
 
 - **`Layer.value(tag, service)`** — an already-built value. Needs nothing, cannot fail.
 - **`Layer.factory(tag, f)`** — built synchronously and infallibly from the context.
 - **`Layer.make(tag, f)`** — may fail and/or be async; `f` returns a `Result`/`AsyncResult`
   whose error type becomes the layer's `E`.
+
+Plus two **constructor-injection sugars** over `factory` — they remove the hand-written
+`ctx => new X(ctx.get(A), ctx.get(B))` factory (the `asClass` / `Effect.Service` ergonomic),
+and demesne does the instantiation. Both stay infallible (`E = never`; a throwing constructor
+becomes a `Defect`, like `factory`):
+
+- **`Layer.class(tag, [deps], Ctor)`** — constructs `Ctor` from a **tag list**. The list is
+  type-checked against the constructor's parameters (wrong order / type / arity is a compile
+  error via `new (...args: DepServices<D>) => Instance`); `Needs` is the union of the deps'
+  identities. The class stays **plain** — it never imports demesne.
+- **`Service<Self>()(id, {deps})`** — the fused `Effect.Service` analog: **one** class
+  declaration is the Tag, the injected `this.dep` fields (typed from the record), and a
+  `.layer` (memoized to a **stable reference** so a shared service builds once). The trade is
+  coupling — the class **extends a demesne base** — in exchange for the fewest artifacts. For a
+  `Service`, the tag's identity and its service shape **coincide** (`Tag<Self, Self>`), the one
+  deliberate exception to invariant #3's tag-≠-service rule (opt-in, like Effect). Do **not**
+  make `Layer.class`/`Service` fallible or async (that's `make`'s lane), and do **not** drop
+  the `.layer` reference cache (a fresh object per access would defeat memoization — see #10).
 
 ### 8. `Layer.merge` builds in parallel; failure semantics are fixed
 
@@ -133,14 +151,16 @@ short-circuit, throw → Defect, and an N-way merge.)_
 ### 9. Operations are namespaced under `Layer` / `Context`
 
 The public value surface is grouped into companion objects so a reader can tell a
-Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,merge,
-provideTo,collect,onStart,onStop,build,scoped,forkScope}` and
+Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,class,
+merge,provideTo,collect,onStart,onStop,build,scoped,forkScope}` and
 `Context.{empty}`. Assembly is single-pass and fully type-checked — graphs are composed by
 hand with `provideTo` / `merge`; there is **no auto-wiring** (see the "no `wire`" note in
 Accepted constraints). `Context` and `Layer` are each **both a
 type and a value** (`Context<R>` / `Context.empty()`, `Layer<P, E, N>` /
-`Layer.make(...)`). `Tag` stays top-level — it names a service and builds neither. Do
-not re-flatten these into top-level function exports.
+`Layer.make(...)`). `Tag` **and `Service`** stay top-level — `Tag` names a service and builds
+neither; `Service` mints a self-injecting service class (a Tag + a `.layer`), so it is a
+class-defining primitive alongside `Tag`, not a `Layer` operation. Do not re-flatten these
+into top-level function exports, and do not move `Service` under `Layer`.
 
 ### 10. A `BuildState` is threaded through every build (memoization + teardown)
 

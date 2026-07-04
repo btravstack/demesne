@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type Context, Layer, Tag } from "./index.js";
+import { type Context, Layer, Service, Tag } from "./index.js";
 import {
   type AsyncResult,
   Err,
@@ -106,6 +106,97 @@ describe("happy path: a value + factory + make graph builds to Ok", () => {
     expect(found.unwrapErr()).toBeInstanceOf(OrderNotFound);
     // Note: `ctx.get(AppConfig)` would be a COMPILE error here — AppConfig is
     // consumed by `provideTo` and is not in AppLayer's Provides union.
+  });
+});
+
+describe("Layer.class: constructor injection without a hand-written factory", () => {
+  it("resolves the deps list and constructs the class, injecting services in order", async () => {
+    const logs: string[] = [];
+    const order: Order = { id: "o-1", total: 42 };
+
+    // Plain application class — no demesne import, just `ServiceOf<...>` constructor params.
+    class GetOrderInteractor {
+      constructor(
+        private readonly logger: ServiceOf<typeof LoggerService>,
+        private readonly orders: ServiceOf<typeof OrderRepository>,
+      ) {}
+      run(id: string): AsyncResult<Order, OrderNotFound> {
+        this.logger.log(`get ${id}`);
+        return this.orders.findById(id);
+      }
+    }
+    class GetOrder extends Tag("ClassGetOrder")<GetOrder, GetOrderInteractor>() {}
+
+    const LoggerLive = Layer.value(LoggerService, { log: (m) => logs.push(m) });
+    const RepoLive = Layer.value(OrderRepository, {
+      findById: (id) => (id === "o-1" ? Ok(order) : Err(new OrderNotFound({ id }))).toAsync(),
+    });
+    // The deps list drives `new GetOrderInteractor(logger, orders)` — no factory, no `ctx.get`.
+    const GetOrderLive = Layer.class(
+      GetOrder,
+      [LoggerService, OrderRepository],
+      GetOrderInteractor,
+    );
+
+    const ctx = (
+      await Layer.build(Layer.provideTo(GetOrderLive, Layer.merge(LoggerLive, RepoLive)))
+    ).unwrap();
+    const found = await ctx.get(GetOrder).run("o-1");
+
+    expect(found.unwrap()).toEqual(order);
+    expect(logs).toEqual(["get o-1"]);
+  });
+
+  it("a throw in the constructed class becomes a Defect", async () => {
+    class Boom {
+      constructor(_logger: ServiceOf<typeof LoggerService>) {
+        throw new Error("ctor boom");
+      }
+    }
+    class BoomTag extends Tag("ClassBoom")<BoomTag, Boom>() {}
+    const LoggerLive = Layer.value(LoggerService, { log: () => {} });
+    const BoomLive = Layer.class(BoomTag, [LoggerService], Boom);
+
+    const result = await Layer.build(Layer.provideTo(BoomLive, LoggerLive));
+
+    expect(result.isDefect()).toBe(true);
+  });
+});
+
+describe("Service: tag + injection + layer in one declaration", () => {
+  it("injects each dep as a typed field and exposes a buildable `.layer`", async () => {
+    const logs: string[] = [];
+    const order: Order = { id: "s-1", total: 7 };
+
+    // One declaration: a Tag, injected `this.logger` / `this.orders`, and `GetOrderSvc.layer`.
+    class GetOrderSvc extends Service<GetOrderSvc>()("SvcGetOrder", {
+      logger: LoggerService,
+      orders: OrderRepository,
+    }) {
+      run(id: string): AsyncResult<Order, OrderNotFound> {
+        this.logger.log(`svc ${id}`);
+        return this.orders.findById(id);
+      }
+    }
+
+    const LoggerLive = Layer.value(LoggerService, { log: (m) => logs.push(m) });
+    const RepoLive = Layer.value(OrderRepository, {
+      findById: (id) => (id === "s-1" ? Ok(order) : Err(new OrderNotFound({ id }))).toAsync(),
+    });
+
+    const ctx = (
+      await Layer.build(Layer.provideTo(GetOrderSvc.layer, Layer.merge(LoggerLive, RepoLive)))
+    ).unwrap();
+    const found = await ctx.get(GetOrderSvc).run("s-1");
+
+    expect(found.unwrap()).toEqual(order);
+    expect(logs).toEqual(["svc s-1"]);
+  });
+
+  it("`.layer` is a stable reference so a shared service builds once", () => {
+    class Widget extends Service<Widget>()("SvcWidget", { logger: LoggerService }) {}
+
+    expect(Widget.layer).toBe(Widget.layer);
   });
 });
 

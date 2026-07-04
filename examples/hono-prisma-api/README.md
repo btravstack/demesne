@@ -10,7 +10,8 @@ src/
   domain/todo.ts               # entity + tagged errors (no demesne, no Prisma, no HTTP)
   application/ports.ts         # Logger + TodoRepository ports (tags; domain types only)
   application/plugins.ts       # AuditSinks plugin collection: member + collect
-  application/*-todo(s).ts     # use cases — constructor-injected, one `execute` method
+  application/get-todo.ts      # use case via `Service` — one fused declaration (tag+inject+layer)
+  application/{list,create}-*  # use cases via `Layer.class` — plain class + a deps list
   config/env.ts                # zod schema → AppConfig (Layer.make → ConfigError)
   infra/prisma.ts              # PrismaClient as a resource (acquireRelease → Scope)
   infra/todo-repository.ts     # TodoRepository backed by Prisma, rows → domain Todo
@@ -36,6 +37,11 @@ prisma.config.ts               # Prisma 7 config (migrate connection URL)
   (`@prisma/adapter-pg`) takes the URL from the zod-validated config, not the schema.
 - **Ports keep Prisma out of the core.** The `TodoRepository` port speaks only domain types;
   the Prisma-backed adapter maps rows to `Todo` and turns a missing row into `TodoNotFound`.
+- **Constructor injection, two ways.** The use cases are classes built from ports, so demesne
+  does the `new` for you: `list`/`create` use `Layer.class(tag, [Logger, TodoRepository], Ctor)`
+  (the class stays plain, the deps list is checked against the constructor); `get-todo` uses
+  `Service` (one declaration fuses the tag, the injected `this.logger` / `this.todos`, and
+  `GetTodo.layer`). Neither writes a hand-rolled `ctx => new UseCase(...)` factory.
 - **One bootstrap for the app and the tests (the test seam).** `bootstrap.ts` assembles the
   app around a repository provider by hand (`provideTo` / `merge` — demesne has no auto-wiring);
   `app.ts` calls `bootstrap(prismaRepo)`, the tests call `bootstrap(fake)`, so both build the

@@ -1,7 +1,7 @@
 // Application — the "create todo" use case. It takes a validated input (the HTTP edge does
 // the zod body validation) and returns the created todo or a RepositoryError.
 
-import { type Context, Layer, type ServiceOf, Tag } from "demesne";
+import { Layer, type ServiceOf, Tag } from "demesne";
 import type { AsyncResult } from "unthrown";
 
 import type { NewTodo, RepositoryError, Todo } from "../domain/todo.js";
@@ -21,8 +21,8 @@ class CreateTodoInteractor {
 
 export class CreateTodo extends Tag("CreateTodo")<CreateTodo, CreateTodoInteractor>() {}
 
-export const CreateTodoLive = Layer.factory(
+export const CreateTodoLive = Layer.class(
   CreateTodo,
-  (ctx: Context<Logger | TodoRepository>) =>
-    new CreateTodoInteractor(ctx.get(Logger), ctx.get(TodoRepository)),
+  [Logger, TodoRepository],
+  CreateTodoInteractor,
 );

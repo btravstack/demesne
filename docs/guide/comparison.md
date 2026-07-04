@@ -54,6 +54,13 @@ regression. If you want the whole effect system — concurrency, interruption, s
 retries — reach for Effect; demesne does one thing: wiring, and delegates errors to
 unthrown.
 
+For the common case — a class built from ports — demesne does the instantiation for you:
+`Layer.class(tag, [deps], Ctor)` is the type-safe analog of Awilix's `asClass` (a container
+that `new`s your class), and `Service<Self>()(id, { deps })` mirrors `Effect.Service` (one
+declaration is the tag, the injected fields, and the layer). Unlike a reflective container,
+the deps are checked against the constructor at **compile** time — a missing or mistyped
+dependency is a red squiggle, not a runtime `AwilixResolutionError`.
+
 ## Beyond TypeScript
 
 The `Layer` idea comes from **Scala's ZIO `ZLayer`** (and Effect ported it to TS). ZIO's

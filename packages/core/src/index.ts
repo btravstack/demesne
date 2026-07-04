@@ -53,19 +53,24 @@ export interface TagClass<Self, Id extends string, Service> extends Tag<Self, Se
 const isDev = typeof process === "undefined" || process.env["NODE_ENV"] !== "production";
 const seenTagIds = new Set<string>();
 
+// Warn (once per id, dev-only) when an id repeats — shared by `Tag` and `Service`, both of
+// which mint a nominal identity keyed by the id.
+const warnDuplicateId = (id: string): void => {
+  if (!isDev) return;
+  if (seenTagIds.has(id)) {
+    console.warn(
+      `demesne: duplicate Tag id ${JSON.stringify(id)} — tag ids must be unique, or two ` +
+        `tags collide in the Context and one reads the other's service.`,
+    );
+  } else {
+    seenTagIds.add(id);
+  }
+};
+
 export const Tag =
   <const Id extends string>(id: Id) =>
   <Self, Service>(): TagClass<Self, Id, Service> => {
-    if (isDev) {
-      if (seenTagIds.has(id)) {
-        console.warn(
-          `demesne: duplicate Tag id ${JSON.stringify(id)} — tag ids must be unique, or two ` +
-            `tags collide in the Context and one reads the other's service.`,
-        );
-      } else {
-        seenTagIds.add(id);
-      }
-    }
+    warnDuplicateId(id);
     const cls = class {
       static readonly [TagTypeId] = TagTypeId;
       static readonly key = id;
@@ -319,6 +324,99 @@ const member = <Self, Item, Needs = never>(
       .map(() => unsafeAdd(emptyAny(), collectionTag.key, [f(ctx)] as readonly Item[])),
 });
 
+// The constructor-argument tuple a dependency-tag list induces (each tag → its service),
+// and the `Needs` it induces (the union of the tags' nominal identities).
+type DepServices<D extends readonly Tag<any, any>[]> = { [K in keyof D]: ServiceOf<D[K]> };
+type DepNeeds<D extends readonly Tag<any, any>[]> = {
+  [K in keyof D]: D[K] extends Tag<infer Self, any> ? Self : never;
+}[number];
+
+// Construct a class from a list of dependency tags — constructor injection with no
+// hand-written factory. demesne resolves each tag from the context and passes the services,
+// IN ORDER, to `new Ctor(...)`. The tuple is type-checked against the constructor's parameters
+// (wrong order / type / arity is a compile error) and the tags' identities become the layer's
+// `Needs`. `new Ctor` runs inside `.map`, so a throw in the constructor becomes a `Defect`
+// (like `factory`). The class stays plain — it never imports demesne, it just declares
+// `ServiceOf<...>` constructor parameters.
+const classLayer = <Self, Instance, const D extends readonly Tag<any, any>[]>(
+  tag: Tag<Self, Instance>,
+  deps: D,
+  ctor: new (...args: DepServices<D>) => Instance,
+): Layer<Self, never, DepNeeds<D>> => ({
+  build: (ctx) =>
+    Ok<void>(undefined)
+      .toAsync()
+      .map(() => {
+        const args = (deps as readonly Tag<any, any>[]).map((d) => (ctx as Context<any>).get(d));
+        return unsafeAdd(emptyAny(), tag.key, new ctor(...(args as DepServices<D>)));
+      }),
+});
+
+// The injected instance shape a deps RECORD induces (each field → its tag's service), and the
+// `Needs` it induces (the union of the record's tags' identities).
+type InjectedOf<R extends Record<string, Tag<any, any>>> = {
+  readonly [K in keyof R]: ServiceOf<R[K]>;
+};
+type NeedsOfRecord<R extends Record<string, Tag<any, any>>> = {
+  [K in keyof R]: R[K] extends Tag<infer Self, any> ? Self : never;
+}[keyof R];
+
+// The type of a `Service(...)` base: a Tag whose service is the instance itself, an
+// injecting constructor (instances carry the resolved deps), and a `.layer` that builds it.
+export interface ServiceClass<Self, Id extends string, R extends Record<string, Tag<any, any>>>
+  extends Tag<Self, Self> {
+  new (injected: InjectedOf<R>): InjectedOf<R>;
+  readonly key: Id;
+  readonly layer: Layer<Self, never, NeedsOfRecord<R>>;
+}
+
+// Cache the derived layer per Service subclass so `Foo.layer` returns a STABLE reference — the
+// build memoizes by reference, and a fresh layer object per access would build twice (M1).
+const serviceLayers = new WeakMap<object, Layer<any, any, any>>();
+
+// A Service base fuses tag + constructor-injection + layer into ONE class declaration (the
+// `Effect.Service` analog). `class Foo extends Service<Foo>()("Foo", { dep: DepTag }) {}` makes
+// `Foo` a Tag whose service is the instance, injects each entry as `this.dep` (typed from the
+// record), and exposes `Foo.layer` — the Layer that resolves the deps and constructs `new Foo`.
+// The trade vs `Layer.class`: the class extends a demesne base (coupling) for the fewest
+// artifacts. `new Foo` runs inside `.map`, so a throwing field initializer becomes a `Defect`.
+export const Service =
+  <Self>() =>
+  <const Id extends string, R extends Record<string, Tag<any, any>>>(
+    id: Id,
+    deps: R,
+  ): ServiceClass<Self, Id, R> => {
+    warnDuplicateId(id);
+    const base = class {
+      static readonly [TagTypeId] = TagTypeId;
+      static readonly key = id;
+      constructor(injected: InjectedOf<R>) {
+        Object.assign(this, injected);
+      }
+      // `this` is the SUBCLASS when accessed as `Foo.layer`; cache the reference per subclass.
+      static get layer(): Layer<Self, never, NeedsOfRecord<R>> {
+        const cached = serviceLayers.get(this);
+        if (cached !== undefined) return cached as Layer<Self, never, NeedsOfRecord<R>>;
+        const Ctor = this as unknown as new (injected: InjectedOf<R>) => Self;
+        const layer: Layer<Self, never, NeedsOfRecord<R>> = {
+          build: (ctx) =>
+            Ok<void>(undefined)
+              .toAsync()
+              .map(() => {
+                const injected: Record<string, unknown> = {};
+                for (const key of Object.keys(deps)) {
+                  injected[key] = (ctx as Context<any>).get(deps[key] as Tag<any, any>);
+                }
+                return unsafeAdd(emptyAny(), id, new Ctor(injected as InjectedOf<R>));
+              }),
+        };
+        serviceLayers.set(this, layer);
+        return layer;
+      }
+    };
+    return base as unknown as ServiceClass<Self, Id, R>;
+  };
+
 // Distribute over a union of layers to collect each channel as a union. Naked
 // type parameters, so applying them to `Ls[number]` distributes over the tuple.
 type ProvidesOf<L> = L extends Layer<infer P, any, any> ? P : never;
@@ -452,16 +550,19 @@ const forkScope = <Parent, ReqP, E, A, E2>(
 // Context constructors. (Reading a service is the instance method `ctx.get(tag)`.)
 export const Context = { empty };
 
-// Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member`),
+// Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member` / `class`),
 // combinators (`merge` / `provideTo` / `collect` / `onStart` / `onStop`), and the terminals
-// `build` / `scoped` / `forkScope`. Assembly is single-pass and fully type-checked: you
-// compose a graph by hand with `provideTo` / `merge` (there is no runtime auto-wiring).
+// `build` / `scoped` / `forkScope`. `class` is constructor-injection sugar over `factory`; the
+// fused `Service` base (a Tag + `.layer`) is exported top-level, alongside `Tag`. Assembly is
+// single-pass and fully type-checked: you compose a graph by hand with `provideTo` / `merge`
+// (there is no runtime auto-wiring).
 export const Layer = {
   value,
   factory,
   make,
   acquireRelease,
   member,
+  class: classLayer,
   merge,
   provideTo,
   collect,

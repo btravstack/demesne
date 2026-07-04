@@ -1,8 +1,9 @@
 // Application — the "list todos" use case. Constructor-injected ports, one public `execute`
-// method, no demesne types inside. A `Layer.factory` performs the injection so it joins the
-// typed graph.
+// method, and NO demesne types inside the class. `Layer.class` does the injection from a deps
+// list — no hand-written factory, no `ctx.get` — while the class stays plain TS. The deps list
+// is type-checked against the constructor (wrong order / type / arity is a compile error).
 
-import { type Context, Layer, type ServiceOf, Tag } from "demesne";
+import { Layer, type ServiceOf, Tag } from "demesne";
 import type { AsyncResult } from "unthrown";
 
 import type { RepositoryError, Todo } from "../domain/todo.js";
@@ -22,8 +23,4 @@ class ListTodosInteractor {
 
 export class ListTodos extends Tag("ListTodos")<ListTodos, ListTodosInteractor>() {}
 
-export const ListTodosLive = Layer.factory(
-  ListTodos,
-  (ctx: Context<Logger | TodoRepository>) =>
-    new ListTodosInteractor(ctx.get(Logger), ctx.get(TodoRepository)),
-);
+export const ListTodosLive = Layer.class(ListTodos, [Logger, TodoRepository], ListTodosInteractor);

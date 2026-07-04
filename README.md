@@ -138,17 +138,18 @@ class OrderRepository extends Tag("OrderRepository")<
 
 A use case, **wired by demesne**. The implementation is a class with constructor-injected
 ports and a single public `execute` method — it uses no demesne types, so its signature
-says only what it asks for (an order id) and returns. A `Layer.factory` performs the
-constructor injection, so the use case joins the typed graph: `Layer.build` won't compile
-until its ports are wired, and the rest of the app resolves it with `ctx.get(GetOrder)`.
+says only what it asks for (an order id) and returns. `Layer.class` does the constructor
+injection from a **deps list** — no hand-written factory — so the use case joins the typed
+graph: the list is type-checked against the constructor, `Layer.build` won't compile until the
+ports are wired, and the rest of the app resolves it with `ctx.get(GetOrder)`.
 
 ```ts
 // application/get-order.ts
-import { type Context, Layer, type ServiceOf, Tag } from "demesne";
+import { Layer, type ServiceOf, Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 import { Logger, OrderRepository } from "./ports.js";
 
-// The use case logic — constructor DI, one public method, framework-agnostic.
+// The use case logic — constructor DI, one public method, framework-agnostic (no demesne).
 class GetOrderInteractor {
   constructor(
     private readonly logger: ServiceOf<Logger>,
@@ -164,13 +165,26 @@ class GetOrderInteractor {
 // The use case as a port other code resolves from the context.
 export class GetOrder extends Tag("GetOrder")<GetOrder, GetOrderInteractor>() {}
 
-// The application layer: constructor injection performed inside a factory.
-export const GetOrderLive = Layer.factory(
-  GetOrder,
-  (ctx: Context<Logger | OrderRepository>) =>
-    new GetOrderInteractor(ctx.get(Logger), ctx.get(OrderRepository)),
-);
+// The application layer: demesne constructs `new GetOrderInteractor(logger, orders)` for you.
+// The tag list is checked against the constructor; its identities become the layer's Needs.
+export const GetOrderLive = Layer.class(GetOrder, [Logger, OrderRepository], GetOrderInteractor);
 ```
+
+> Prefer **one** declaration and don't mind the class extending a demesne base? `Service` fuses
+> the tag, the injected `this.logger` / `this.orders`, and the layer:
+>
+> ```ts
+> class GetOrder extends Service<GetOrder>()("GetOrder", {
+>   logger: Logger,
+>   orders: OrderRepository,
+> }) {
+>   execute(id: string) {
+>     this.logger.log(id);
+>     return this.orders.findById(id);
+>   }
+> }
+> const GetOrderLive = GetOrder.layer; // Layer<GetOrder, never, Logger | OrderRepository>
+> ```
 
 ### Adapters
 

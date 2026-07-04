@@ -9,7 +9,7 @@
 // error channel is the real union, `Context` is contravariant, scopes are enforced,
 // and the combinators (`merge` / `collect` / lifecycle hooks) compute every channel exactly.
 
-import { type Context, Layer, type Scope, type ServiceOf, Tag } from "./index.js";
+import { type Context, Layer, type Scope, Service, type ServiceOf, Tag } from "./index.js";
 import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
 
 // --- assertion helpers -------------------------------------------------------
@@ -196,3 +196,43 @@ type _stopped = Expect<Equal<typeof stopped, Layer<ServiceA, EA, Scope>>>;
 Layer.build(stopped);
 const stoppedScoped = Layer.scoped(stopped, (): Result<number, never> => Ok(1));
 type _stoppedScoped = Expect<Equal<typeof stoppedScoped, AsyncResult<number, EA>>>;
+
+// --- 9. Layer.class + Service: constructor-injection sugar -------------------
+
+class Consumer {
+  constructor(
+    readonly a: ServiceOf<typeof ServiceA>,
+    readonly b: ServiceOf<typeof ServiceB>,
+  ) {}
+}
+class ConsumerTag extends Tag("ConsumerTag")<ConsumerTag, Consumer>() {}
+
+// Layer.class: Provides = the tag's Self, E = never, Needs = union of the deps' identities.
+const consumerLive = Layer.class(ConsumerTag, [ServiceA, ServiceB], Consumer);
+type _consumerLive = Expect<
+  Equal<typeof consumerLive, Layer<ConsumerTag, never, ServiceA | ServiceB>>
+>;
+
+// The deps list is type-checked against the constructor. A tag whose service doesn't match a
+// constructor parameter is rejected (ServiceC's shape ≠ Consumer's second param).
+// @ts-expect-error - [ServiceA, ServiceC] does not match Consumer's (a: A, b: B).
+Layer.class(ConsumerTag, [ServiceA, ServiceC], Consumer);
+
+// Too few deps for the constructor is rejected (arity — Consumer needs two args).
+// @ts-expect-error - one tag is not enough for a two-parameter constructor.
+Layer.class(ConsumerTag, [ServiceA], Consumer);
+
+// Service: `.layer` has Needs = union of the record's identities, Provides = the instance.
+class Widget extends Service<Widget>()("WidgetSvc", { a: ServiceA, b: ServiceB }) {
+  ab(): string {
+    return `${this.a.a}:${this.b.b}`;
+  }
+}
+type _widgetLayer = Expect<Equal<typeof Widget.layer, Layer<Widget, never, ServiceA | ServiceB>>>;
+
+// The injected fields are typed from the record, and reading the service yields the instance.
+declare const widget: Widget;
+type _widgetA = Expect<Equal<typeof widget.a, { readonly a: string }>>;
+declare const ctxWidget: Context<Widget>;
+const gotWidget = ctxWidget.get(Widget);
+type _gotWidget = Expect<Equal<typeof gotWidget, Widget>>;
