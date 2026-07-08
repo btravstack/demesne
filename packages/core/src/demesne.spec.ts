@@ -433,6 +433,45 @@ describe("parallel merge", () => {
     expect(result.unwrapErr()).toBeInstanceOf(ConfigError);
   });
 
+  it("with two failing layers, the FIRST LISTED error wins (fold order, not timing)", async () => {
+    class OtherError extends TaggedError("OtherError")<{ n: number }> {}
+    // Listed first, but resolves LAST — must still be the reported error.
+    const SlowFirst = Layer.make(LoggerService, () =>
+      fromSafePromise(delay(20)).flatMap(
+        (): Result<ServiceOf<typeof LoggerService>, ConfigError> =>
+          Err(new ConfigError({ reason: "first" })),
+      ),
+    );
+    const FastSecond = Layer.make(
+      AppConfig,
+      (): Result<ServiceOf<typeof AppConfig>, OtherError> => Err(new OtherError({ n: 2 })),
+    );
+
+    const result = await Layer.build(Layer.merge(SlowFirst, FastSecond));
+
+    const err = result.unwrapErr();
+    expect(err).toBeInstanceOf(ConfigError);
+    expect((err as ConfigError).reason).toBe("first");
+  });
+
+  it("a Defect dominates a sibling Err in a merge", async () => {
+    // The Err is listed first AND resolves first; the late throw still wins.
+    const Bad = Layer.make(
+      AppConfig,
+      (): Result<ServiceOf<typeof AppConfig>, ConfigError> =>
+        Err(new ConfigError({ reason: "modeled" })),
+    );
+    const Boom = Layer.make(Marker, () =>
+      fromSafePromise(delay(10)).map((): ServiceOf<typeof Marker> => {
+        throw new Error("late boom");
+      }),
+    );
+
+    const result = await Layer.build(Layer.merge(Bad, Boom));
+
+    expect(result.isDefect()).toBe(true);
+  });
+
   it("a thrown value inside construction becomes a Defect", async () => {
     const Good = Layer.value(LoggerService, { log: () => {} });
     const Boom = Layer.make(Marker, (): Result<ServiceOf<typeof Marker>, never> => {
@@ -493,6 +532,36 @@ describe("internals: defensive runtime guards", () => {
         expect.stringContaining('duplicate Tag id "DuplicateIdGuard"'),
       );
     } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("warns only ONCE per id, no matter how many times the id repeats", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      class DupA extends Tag("DuplicateIdOnce")<DupA, { readonly a: string }>() {}
+      class DupB extends Tag("DuplicateIdOnce")<DupB, { readonly b: number }>() {}
+      class DupC extends Tag("DuplicateIdOnce")<DupC, { readonly c: boolean }>() {}
+      void DupA;
+      void DupB;
+      void DupC;
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("is silent when NODE_ENV=production (the guard is development-only)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      class DupA extends Tag("DuplicateIdProd")<DupA, { readonly a: string }>() {}
+      class DupB extends Tag("DuplicateIdProd")<DupB, { readonly b: number }>() {}
+      void DupA;
+      void DupB;
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
       warn.mockRestore();
     }
   });
@@ -608,6 +677,37 @@ describe("scopes: acquireRelease + scoped", () => {
     expect(released).toEqual(["A"]); // released despite the failure
   });
 
+  it("releases resources acquired before a sibling BUILD failure (partial build)", async () => {
+    const events: string[] = [];
+    class BuildBoom extends TaggedError("BuildBoom")<{ why: string }> {}
+
+    const A = Layer.acquireRelease(
+      PoolA,
+      (): Result<Pool, never> => {
+        events.push("acquire:A");
+        return Ok({ id: 1 });
+      },
+      () => {
+        events.push("release:A");
+      },
+    );
+    // Fails AFTER A's acquire has completed — the build errs partway through.
+    const Failing = Layer.make(PoolB, () =>
+      fromSafePromise(delay(10)).flatMap(
+        (): Result<Pool, BuildBoom> => Err(new BuildBoom({ why: "db down" })),
+      ),
+    );
+
+    const out = await Layer.scoped(
+      Layer.merge(A, Failing),
+      (): Result<string, never> => Ok("unreachable"),
+    );
+
+    expect(out.unwrapErr()).toBeInstanceOf(BuildBoom);
+    // `use` never ran, yet the resource acquired before the failure was released.
+    expect(events).toEqual(["acquire:A", "release:A"]);
+  });
+
   it("`scoped` returns the `use` result and supports async use", async () => {
     const A = Layer.value(PoolA, { id: 7 });
     const out = await Layer.scoped(A, (ctx) =>
@@ -711,6 +811,47 @@ describe("Layer.forkScope: request / child scopes", () => {
     expect(count).toBe(2);
   });
 
+  it("releases multiple request resources in LIFO order", async () => {
+    const events: string[] = [];
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+
+    class ReqA extends Tag("ForkReqA")<ReqA, { readonly n: number }>() {}
+    class ReqB extends Tag("ForkReqB")<ReqB, { readonly n: number }>() {}
+    const First = Layer.acquireRelease(
+      ReqA,
+      (): Result<{ readonly n: number }, never> => {
+        events.push("acquire:A");
+        return Ok({ n: 1 });
+      },
+      () => {
+        events.push("release:A");
+      },
+    );
+    // B needs A, so A is acquired first — and must be released AFTER B (LIFO).
+    const Second = Layer.acquireRelease(
+      ReqB,
+      (ctx: Context<ReqA>): Result<{ readonly n: number }, never> => {
+        events.push("acquire:B");
+        return Ok({ n: ctx.get(ReqA).n + 1 });
+      },
+      () => {
+        events.push("release:B");
+      },
+    );
+
+    const out = await Layer.forkScope(
+      appCtx,
+      Layer.provideTo(Second, First),
+      (ctx): Result<number, never> => {
+        events.push("use");
+        return Ok(ctx.get(ReqB).n);
+      },
+    );
+
+    expect(out.unwrap()).toBe(2);
+    expect(events).toEqual(["acquire:A", "acquire:B", "use", "release:B", "release:A"]);
+  });
+
   it("releases request resources even when use fails", async () => {
     const released: string[] = [];
     const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
@@ -733,6 +874,30 @@ describe("Layer.forkScope: request / child scopes", () => {
 
     expect(out.unwrapErr()).toBeInstanceOf(ForkBoom);
     expect(released).toEqual(["txn"]);
+  });
+});
+
+describe("Layer.fromService: a fresh layer per call, singleton via a shared const", () => {
+  it("each call mints a distinct layer; the shared reference is the singleton seam", async () => {
+    let stamps = 0;
+    class Stamp extends Service<Stamp>()("StampSvc", {}) {
+      readonly n = (stamps += 1);
+    }
+
+    const l1 = Layer.fromService(Stamp);
+    const l2 = Layer.fromService(Stamp);
+    expect(l1).not.toBe(l2);
+
+    // Two distinct references construct twice (the memo is keyed by reference)...
+    const twice = await Layer.build(Layer.merge(l1, l2));
+    expect(twice.isOk()).toBe(true);
+    expect(stamps).toBe(2);
+
+    // ...while one reference reused across branches constructs once.
+    stamps = 0;
+    const once = await Layer.build(Layer.merge(l1, l1));
+    expect(once.isOk()).toBe(true);
+    expect(stamps).toBe(1);
   });
 });
 

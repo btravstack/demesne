@@ -12,10 +12,10 @@
 
 import { Ok, allAsync, fromSafePromise, type Result, type AsyncResult } from "unthrown";
 
-const TagTypeId = Symbol.for("mini-di/Tag");
-const ContextTypeId = Symbol.for("mini-di/Context");
+const TagTypeId = Symbol.for("demesne/Tag");
+const ContextTypeId = Symbol.for("demesne/Context");
 // Where a `Service` subclass records its deps record, for `Layer.fromService` to read.
-const ServiceDepsId = Symbol.for("mini-di/ServiceDeps");
+const ServiceDepsId = Symbol.for("demesne/ServiceDeps");
 
 // ---------------------------------------------------------------------------
 // Tag — a typed key. The class itself is the nominal identity that appears in
@@ -49,23 +49,31 @@ export interface TagClass<Self, Id extends string, Service> extends Tag<Self, Se
 // so in a Context one silently reads the other's service. Ids must be globally unique.
 //
 // The guard is **development-only** — it is a best-effort dev aid, not part of the runtime
-// contract: bundlers replace `process.env.NODE_ENV` so the whole block (and the module-level
-// `Set`) drop out of a production build, keeping the library side-effect-free at runtime. It
-// warns (never throws — a latent duplicate shouldn't crash) the first time an id repeats.
-const isDev = typeof process === "undefined" || process.env["NODE_ENV"] !== "production";
-const seenTagIds = new Set<string>();
+// contract. The `process.env.NODE_ENV` check sits INSIDE the call, with dot access, so
+// bundler define-replacement (`process.env.NODE_ENV` → `"production"`) folds the whole body
+// away in a production build; environments without a `process` global (a browser with no
+// shim) are silent; and the registry is allocated lazily, so importing the module has no
+// side effects. It warns (never throws — a latent duplicate shouldn't crash) exactly once
+// per repeated id.
+declare const process: undefined | { readonly env: { readonly NODE_ENV?: string } };
+
+// id → whether the duplicate warning for it already fired (dev-only, allocated on first Tag).
+let seenTagIds: Map<string, boolean> | undefined;
 
 // Warn (once per id, dev-only) when an id repeats — shared by `Tag` and `Service`, both of
 // which mint a nominal identity keyed by the id.
 const warnDuplicateId = (id: string): void => {
-  if (!isDev) return;
-  if (seenTagIds.has(id)) {
+  if (typeof process === "undefined" || process.env.NODE_ENV === "production") return;
+  seenTagIds ??= new Map();
+  const warned = seenTagIds.get(id);
+  if (warned === undefined) {
+    seenTagIds.set(id, false);
+  } else if (!warned) {
+    seenTagIds.set(id, true);
     console.warn(
       `demesne: duplicate Tag id ${JSON.stringify(id)} — tag ids must be unique, or two ` +
         `tags collide in the Context and one reads the other's service.`,
     );
-  } else {
-    seenTagIds.add(id);
   }
 };
 
@@ -113,7 +121,7 @@ const makeContext = (map: ReadonlyMap<string, unknown>): Context<any> => ({
   _R: noopR,
   get(tag) {
     if (!map.has(tag.key)) {
-      throw new Error(`mini-di: service "${tag.key}" not found in context`);
+      throw new Error(`demesne: service "${tag.key}" not found in context`);
     }
     return map.get(tag.key) as never;
   },
@@ -188,8 +196,11 @@ export interface Scope {
 //   • startHooks : post-build thunks registered by `onStart`, run in acquisition order
 //     (FIFO — i.e. dependency order, since a dependent builds after its deps) once the
 //     whole graph is constructed, before `use` — see `runStartHooks`.
+//
+// Exported as a type-only name because it appears in `Layer`'s public `build`
+// signature — a hand-written `{ build }` layer needs to be able to name it.
 // ---------------------------------------------------------------------------
-interface BuildState {
+export interface BuildState {
   readonly memoMap: Map<Layer<any, any, any>, AsyncResult<Context<any>, any>>;
   readonly finalizers: (() => Promise<void>)[];
   readonly startHooks: (() => AsyncResult<void, any>)[];

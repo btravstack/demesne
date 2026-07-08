@@ -6,8 +6,6 @@
     "TagTypeId",
     "ContextTypeId",
     "ScopeTypeId",
-    "WireSourceId",
-    "BuildState",
     "ProvidesOf",
     "ErrorOf",
     "NeedsOf"

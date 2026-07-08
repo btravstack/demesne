@@ -40,8 +40,9 @@ prisma.config.ts               # Prisma 7 config (migrate connection URL)
 - **Constructor injection, two ways.** The use cases are classes built from ports, so demesne
   does the `new` for you: `list`/`create` use `Layer.class(tag, [Logger, TodoRepository], Ctor)`
   (the class stays plain, the deps list is checked against the constructor); `get-todo` uses
-  `Service` (one declaration fuses the tag, the injected `this.logger` / `this.todos`, and
-  `GetTodo.layer`). Neither writes a hand-rolled `ctx => new UseCase(...)` factory.
+  `Service` (one declaration fuses the tag and the injected `this.logger` / `this.todos`, with
+  `Layer.fromService(GetTodo)` bound to a `const` as its layer). Neither writes a hand-rolled
+  `ctx => new UseCase(...)` factory.
 - **One bootstrap for the app and the tests (the test seam).** `bootstrap.ts` assembles the
   app around a repository provider by hand (`provideTo` / `merge` — demesne has no auto-wiring);
   `app.ts` calls `bootstrap(prismaRepo)`, the tests call `bootstrap(fake)`, so both build the

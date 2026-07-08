@@ -88,10 +88,7 @@ already-built parent context:
 
 ```ts
 import { Layer, Tag, type Context } from "demesne";
-import { fromPromise, type Result, TaggedError } from "unthrown";
-
-// Built once, at startup — shared by every request.
-const appCtx = (await Layer.scoped(AppLive, (ctx) => Ok(ctx))).unwrap();
+import { fromPromise, TaggedError } from "unthrown";
 
 class Txn extends Tag("Txn")<Txn, { readonly exec: (sql: string) => Promise<void> }>() {}
 class TxnError extends TaggedError("TxnError")<{ cause: unknown }> {}
@@ -103,11 +100,18 @@ const RequestLive = Layer.acquireRelease(
   (txn) => txn.commit(),
 );
 
-// One fork per request: shares the parent singletons, adds Txn, releases it (LIFO) at the end.
-const result = await Layer.forkScope(appCtx, RequestLive, (ctx) =>
-  fromPromise(ctx.get(Txn).exec("insert ..."), (cause) => new TxnError({ cause })),
-);
-// the transaction is released here; the pool and the rest of the parent stay alive
+// The parent scope's lifetime IS the `use` callback — the app is built once, the server
+// runs inside `use`, and each request handler forks a child scope off the built context.
+const outcome = await Layer.scoped(AppLive, (appCtx) => {
+  // One fork per request: shares the parent singletons, adds Txn, releases it (LIFO) at the end.
+  const handleRequest = () =>
+    Layer.forkScope(appCtx, RequestLive, (reqCtx) =>
+      fromPromise(reqCtx.get(Txn).exec("insert ..."), (cause) => new TxnError({ cause })),
+    );
+  // each fork's transaction is released when it ends; the pool and the rest of the parent stay alive
+
+  return serveUntilShutdown(handleRequest); // resolves on shutdown — only then does the parent close
+});
 ```
 
 Notes:
@@ -145,7 +149,7 @@ const ServerLive = Layer.onStop(HttpServerLive, (ctx: Context<HttpServer>) =>
   ctx.get(HttpServer).drain(),
 );
 
-const result = await Layer.scoped(Layer.merge(DbLive, ServerLive, /* … */), use);
+const result = await Layer.scoped(Layer.merge(DbLive, ServerLive /* … */), use);
 // build everything → run start hooks (dep order) → use → run stop hooks + releases (LIFO)
 ```
 

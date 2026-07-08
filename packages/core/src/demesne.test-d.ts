@@ -62,6 +62,21 @@ declare const unwired: Layer<ServiceB, never, ServiceA>;
 // @ts-expect-error - `build` requires Needs = never; ServiceA is still unmet.
 Layer.build(unwired);
 
+// --- 2b. provideTo SUBTRACTS the provided services from Needs (Exclude) -------
+
+declare const needsAB: Layer<ServiceC, never, ServiceA | ServiceB>;
+declare const providesA: Layer<ServiceA, EA, never>;
+declare const providesB: Layer<ServiceB, EB, never>;
+
+// One provider discharges exactly its own service; the rest of Needs survives,
+// and the provider's error unions into E.
+const partiallyWired = Layer.provideTo(needsAB, providesA);
+type _partiallyWired = Expect<Equal<typeof partiallyWired, Layer<ServiceC, EA, ServiceB>>>;
+
+// The second provider discharges the remainder: Needs = never, E = EA | EB.
+const fullyWired = Layer.provideTo(partiallyWired, providesB);
+type _fullyWired = Expect<Equal<typeof fullyWired, Layer<ServiceC, EA | EB, never>>>;
+
 // --- 3. The error channel is the real union, not `any` -----------------------
 
 const layerA = Layer.make(ServiceA, (): Result<{ readonly a: string }, EA> => Ok({ a: "x" }));

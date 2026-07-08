@@ -25,7 +25,7 @@ its own. Async and failure are first-class only because construction _builds to 
 states the concern: the domain you hold in hand and provision directly, nothing more.
 
 `unthrown` is a **peer dependency**, not a bundled one. demesne re-uses its
-`Result` / `AsyncResult` / `Ok` / `Err` / `fromPromise` / `allAsync` / `TaggedError`;
+`Result` / `AsyncResult` / `Ok` / `Err` / `fromPromise` / `fromSafePromise` / `allAsync` / `TaggedError`;
 it never re-implements them.
 
 ## Load-bearing invariants (tests must guard these)
@@ -39,7 +39,8 @@ precisely because TypeScript can remove a union member (`Exclude`) but cannot re
 intersection member — discharging a dependency _is_ removing a member, so the union
 encoding is the one that type-checks. `Layer.build` is callable only when `Needs` is
 `never`. _(Guarded by the type-level tests: un-wired layer rejected by `Layer.build`;
-the error channel of a merged graph is exactly `EA | EB`, not narrowable to one arm.)_
+the error channel of a merged graph is exactly `EA | EB`, not narrowable to one arm;
+`provideTo` subtracts exactly one provider's services from `Needs` while unioning its `E`.)_
 
 ### 2. Requirements are declared at boundaries, not inferred from usage
 
@@ -59,10 +60,13 @@ is legal without the class referencing itself as a base type. The literal `Id` k
 instance types nominal. The one runtime-unsound corner is **duplicate ids**: two distinct
 tag classes sharing an `Id` are distinct types but the same runtime map key, so one silently
 reads the other's service — `Tag` therefore **warns** (once per id, never throws) when an id
-repeats. The warn is a **development-only** best-effort aid (gated on `process.env.NODE_ENV`,
-so bundlers strip it and the module-level `Set` from production — the library stays
-side-effect-free at runtime). Ids must be globally unique. _(Guarded by: reading an absent tag
-is a compile error; the spec asserts the duplicate-id warning.)_
+repeats. The warn is a **development-only** best-effort aid: the `process.env.NODE_ENV`
+check sits **inside the call, with dot access**, so bundler define-replacement folds the
+body out of a production build; environments without a `process` global (a browser with no
+shim) are silent; and the id registry is allocated lazily, so importing the module has no
+side effects. Ids must be globally unique. _(Guarded by: reading an absent tag is a compile
+error; the spec asserts the duplicate-id warning fires exactly once per id and is silent
+under `NODE_ENV=production`.)_
 
 **Definition convention — inline the shape; the class IS the tag.** Prefer a single
 declaration with the service shape inlined over a separate `interface` + short tag
@@ -128,8 +132,10 @@ and demesne does the instantiation. Both stay infallible (`E = never`; a throwin
 becomes a `Defect`, like `factory`):
 
 - **`Layer.class(tag, [deps], Ctor)`** — constructs `Ctor` from a **tag list**. The list is
-  type-checked against the constructor's parameters (wrong order / type / arity is a compile
-  error via `new (...args: DepServices<D>) => Instance`); `Needs` is the union of the deps'
+  type-checked against the constructor's parameters (wrong order, wrong type, or too **few**
+  deps is a compile error via `new (...args: DepServices<D>) => Instance`; **extra trailing
+  deps are NOT caught** — TS accepts a constructor with fewer parameters, so a surplus tag is
+  silently passed and ignored and only widens `Needs`); `Needs` is the union of the deps'
   identities. The class stays **plain** — it never imports demesne.
 - **`Service<Self>()(id, {deps})`** + **`Layer.fromService(Cls)`** — the fused `Effect.Service`
   analog: **one** class declaration is the Tag and the injected `this.dep` fields (typed from
@@ -145,15 +151,20 @@ becomes a `Defect`, like `factory`):
   no static-getter/`this`/`WeakMap` magic). Do **not** make `Layer.class`/`Service`/`fromService`
   fallible or async — that's `make`'s lane. `Layer.class` injects **any** constructor (incl.
   third-party); `Service` only a class you author as its subclass — they are complementary, keep
-  both.
+  both. _(Guarded by the spec: `fromService` mints a fresh layer per call — two calls build
+  twice, one shared const builds once. And the type-level tests: dep-list type / too-few-args
+  rejection, `Service` field typing.)_
 
 ### 8. `Layer.merge` builds in parallel; failure semantics are fixed
 
 `Layer.merge` is **variadic** — it combines any number of independent layers (at least
-one) and builds them concurrently via `allAsync`. The **first `Err` short-circuits**; a
-thrown value becomes a **`Defect`** (it dominates). Provides, errors, and requirements
-all union across every layer. _(Guarded by the runtime spec: timing interleave, Err
-short-circuit, throw → Defect, and an N-way merge.)_
+one) and builds them concurrently via `allAsync`. The **first listed `Err` short-circuits**;
+a thrown value becomes a **`Defect`** (it dominates any sibling `Err`). The short-circuit is
+in the result **fold**, not a cancellation — in-flight sibling builds run to completion
+(`Promise.all` semantics); the first-listed error is simply the one reported. Provides,
+errors, and requirements all union across every layer. _(Guarded by the runtime spec: timing
+interleave, first-listed-Err-wins with two Errs, throw → Defect, Defect dominating a sibling
+Err, and an N-way merge.)_
 
 ### 9. Operations are namespaced under `Layer` / `Context`
 
@@ -171,8 +182,10 @@ re-flatten these into top-level function exports, and do not move `Service` unde
 
 ### 10. A `BuildState` is threaded through every build (memoization + teardown)
 
-Every `build` receives an internal `BuildState` carrying a **memo map** and a
-**finalizer list**.
+Every `build` receives a `BuildState` carrying a **memo map** and a **finalizer list**.
+The interface is exported as a type-only name (it appears in `Layer`'s public `build`
+signature, so a hand-written `{ build }` layer must be able to name it); its instances
+stay internal — only `makeBuildState` creates one.
 
 - **Memoization.** `buildMemo` keys layers by **reference**: a layer shared across
   branches (same object) constructs **once** per build, and the in-flight `AsyncResult`
@@ -192,7 +205,8 @@ Every `build` receives an internal `BuildState` carrying a **memo map** and a
   running finalizers in **reverse acquisition order (LIFO)**, whether `use` succeeded,
   failed, or the build failed partway. `release` is expected to be infallible; teardown
   is best-effort (a throwing release does not abort the others). _(Guarded by the spec:
-  LIFO order, release-on-failure, best-effort teardown.)_
+  LIFO order, release-on-`use`-failure, release-on-partial-build-failure, best-effort
+  teardown.)_
 
 ### 11. `Scope` is a phantom requirement — `build` rejects unreleased resources
 
@@ -233,7 +247,9 @@ array instead (the constructor family stays distinct by qualification — do **n
 `member` into a value-or-Result overload). `collect(collectionTag, members)` builds every
 member in **parallel** (memoized, first `Err` short-circuits, à la `merge`), reads each
 member's array for the tag's key, **concatenates them in listed order** (flattening, so a
-member may contribute several items), and provides the tag with the full array. Members are
+member may contribute several items), and provides the tag with the full array. Listing the
+same member **reference** twice builds it once (the memo) but contributes its items twice —
+a member reference is a singleton per build; its contribution is per listing. Members are
 constrained to `Layer<Self, any, any>` for the same `Self` (a foreign tag is a compile
 error); errors and requirements union across members via `ErrorOf`/`NeedsOf`, and an empty
 list is an empty collection (`Layer<Self, never, never>`). collect must **not** use

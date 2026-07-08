@@ -5,12 +5,12 @@
 Constructors, distinguished by how construction is **qualified**. Do not collapse the
 first three into a single value-or-function overload.
 
-| constructor                                    | sync/async        | can fail | needs context | teardown |
-| ---------------------------------------------- | ----------------- | -------- | ------------- | -------- |
-| `Layer.value(tag, service)`                    | ready value       | no       | no            | no       |
-| `Layer.factory(tag, f)`                        | sync              | no       | yes           | no       |
-| `Layer.make(tag, f)`                           | sync **or** async | yes      | yes           | no       |
-| `Layer.acquireRelease(tag, acquire, release)`  | sync **or** async | yes      | yes           | yes      |
+| constructor                                   | sync/async        | can fail | needs context | teardown |
+| --------------------------------------------- | ----------------- | -------- | ------------- | -------- |
+| `Layer.value(tag, service)`                   | ready value       | no       | no            | no       |
+| `Layer.factory(tag, f)`                       | sync              | no       | yes           | no       |
+| `Layer.make(tag, f)`                          | sync **or** async | yes      | yes           | no       |
+| `Layer.acquireRelease(tag, acquire, release)` | sync **or** async | yes      | yes           | yes      |
 
 ```ts
 // value — an already-built service.
@@ -64,7 +64,10 @@ class GetOrderInteractor {
     private readonly logger: ServiceOf<Logger>,
     private readonly orders: ServiceOf<OrderRepository>,
   ) {}
-  execute(id: string) { this.logger.log(id); return this.orders.findById(id); }
+  execute(id: string) {
+    this.logger.log(id);
+    return this.orders.findById(id);
+  }
 }
 class GetOrder extends Tag("GetOrder")<GetOrder, GetOrderInteractor>() {}
 
@@ -82,7 +85,10 @@ class GetOrder extends Service<GetOrder>()("GetOrder", {
   logger: Logger,
   orders: OrderRepository,
 }) {
-  execute(id: string) { this.logger.log(id); return this.orders.findById(id); }
+  execute(id: string) {
+    this.logger.log(id);
+    return this.orders.findById(id);
+  }
 }
 
 const GetOrderLive = Layer.fromService(GetOrder);
@@ -221,7 +227,7 @@ const TracingLive = Layer.member(Plugins, () => tracingPlugin());
 const AllPlugins = Layer.collect(Plugins, [AuthLive, MetricsLive, TracingLive]);
 //    ^? Layer<Plugins, never, Config>   — Plugins resolves to readonly Plugin[]
 
-const app = Layer.merge(Layer.provideTo(AllPlugins, ConfigLive), /* …consumers of Plugins… */);
+const app = Layer.merge(Layer.provideTo(AllPlugins, ConfigLive) /* …consumers of Plugins… */);
 ctx.get(Plugins); // [auth, metrics, tracing] — in listed order
 ```
 

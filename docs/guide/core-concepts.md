@@ -13,9 +13,12 @@ Define a service by **inlining its shape** — the class _is_ the tag:
 ```ts
 import { Tag } from "demesne";
 
-class Logger extends Tag("Logger")<Logger, {
-  readonly log: (msg: string) => void;
-}>() {}
+class Logger extends Tag("Logger")<
+  Logger,
+  {
+    readonly log: (msg: string) => void;
+  }
+>() {}
 ```
 
 The identifier now names the **tag** (its nominal identity in `R`), **not** the service
@@ -65,9 +68,12 @@ Both `Needs` and `E` accumulate as **unions**: `Layer.merge` widens them,
 
 Operations are grouped so call sites read unambiguously:
 
-- **`Layer.*`** — constructors (`value` / `factory` / `make`), combinators
-  (`merge` / `provideTo`), and the terminal `build`.
+- **`Layer.*`** — constructors (`value` / `factory` / `make` / `class` / `fromService`),
+  resources (`acquireRelease`), multi-bindings (`member` / `collect`), lifecycle hooks
+  (`onStart` / `onStop`), composition (`merge` / `provideTo`), introspection
+  (`describe` / `toDot`), and the terminals (`build` / `scoped` / `forkScope`).
 - **`Context.*`** — `empty` (reading a service is the instance method `ctx.get(tag)`).
 
 `Context` and `Layer` are each **both a type and a value** — `Context<R>` /
-`Context.empty()`, `Layer<P, E, N>` / `Layer.make(...)`. `Tag` stays top-level.
+`Context.empty()`, `Layer<P, E, N>` / `Layer.make(...)`. `Tag` and `Service` stay
+top-level.
