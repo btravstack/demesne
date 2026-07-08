@@ -126,7 +126,7 @@ into a single value-or-function overload:
 - **`Layer.make(tag, f)`** — may fail and/or be async; `f` returns a `Result`/`AsyncResult`
   whose error type becomes the layer's `E`.
 
-Plus two **constructor-injection sugars** over `factory` — they remove the hand-written
+Plus three **injection sugars** over `factory` — they remove the hand-written
 `ctx => new X(ctx.get(A), ctx.get(B))` factory (the `asClass` / `Effect.Service` ergonomic),
 and demesne does the instantiation. Both stay infallible (`E = never`; a throwing constructor
 becomes a `Defect`, like `factory`):
@@ -154,6 +154,17 @@ becomes a `Defect`, like `factory`):
   both. _(Guarded by the spec: `fromService` mints a fresh layer per call — two calls build
   twice, one shared const builds once. And the type-level tests: dep-list type / too-few-args
   rejection, `Service` field typing.)_
+- **`Layer.inject(tag, {deps}, f)`** — the **function-shaped** sugar: builds ANY value
+  (typically a closure — a one-method use case) by injecting a **deps record** into a plain
+  function. `f` receives the resolved record AND the typed `Context` — the context parameter
+  exists to serve as a `forkScope` parent (an injected HTTP app opening request scopes) and
+  is typed by the record-derived `Needs`, so it adds no undeclared capability. Sync and
+  infallible like `factory` (`E = never`; a throw is a `Defect`) — do **not** make it
+  fallible or collapse it into a value-or-Result overload. The record IS the boundary
+  declaration (invariant #2), and being runtime-known it gives `inject` **exact**
+  introspection edges (invariant #15). _(Guarded by the spec: record resolution, empty
+  record, throw → Defect, ctx-as-fork-parent, exact edges. And the type-level tests: `Needs`
+  union from the record, ctx typing, return-shape rejection.)_
 
 ### 8. `Layer.merge` builds in parallel; failure semantics are fixed
 
@@ -170,7 +181,7 @@ Err, and an N-way merge.)_
 
 The public value surface is grouped into companion objects so a reader can tell a
 Layer operation from a Context one: `Layer.{value,factory,make,acquireRelease,member,class,
-fromService,merge,provideTo,collect,onStart,onStop,describe,toDot,build,scoped,forkScope}` and
+fromService,inject,merge,provideTo,collect,onStart,onStop,describe,toDot,build,scoped,forkScope}` and
 `Context.{empty}`. Assembly is single-pass and fully type-checked — graphs are composed by
 hand with `provideTo` / `merge`; there is **no auto-wiring** (see the "no `wire`" note in
 Accepted constraints). `Context` and `Layer` are each **both a
@@ -295,7 +306,7 @@ diagnostic — no factory ever runs** (so it is safe on `acquireRelease` graphs;
 composed _structure_, not a live build). `meta` is **optional** so a hand-built `{ build }`
 layer still satisfies `Layer` — such a layer is **opaque** (contributes nothing), and `meta` is
 **never read during a build**. The honesty of the graph is two-tier and must stay documented:
-edges are **exact** for `value` / `class` / `Service` (their `needs` keys are known at runtime)
+edges are **exact** for `value` / `class` / `Service` / `inject` (their `needs` keys are known at runtime)
 and **inferred** (`edge.inferred = true`, dashed in DOT) for `factory` / `make` /
 `acquireRelease` / `member`, whose per-service `needs` live only in the **erased** `Needs`
 type — their edges are reconstructed from the enclosing `provideTo` composition (what they were
@@ -343,7 +354,7 @@ Deliberate design choices, documented so they aren't rediscovered as bugs:
 The wiring core is complete. Roadmap items **now implemented**: `Layer.forkScope` (request /
 child scopes, see invariant #12); `Layer.member` / `Layer.collect` (multi-bindings, see
 invariant #13); `Layer.onStart` / `Layer.onStop` (lifecycle hooks, see invariant #14);
-`Layer.class` / `Service` (constructor-injection sugar, see invariant #7); and **graph
+`Layer.class` / `Service` / `Layer.inject` (constructor / record injection, see invariant #7); and **graph
 introspection** — `Layer.describe` / `Layer.toDot` (see invariant #15). `Layer.wire` (automatic
 assembly) and `Layer.override` (deep test override) were implemented and then **removed** —
 they were the only parts that resolved at runtime, which is inherently at odds with the
