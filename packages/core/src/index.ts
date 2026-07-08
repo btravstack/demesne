@@ -157,10 +157,10 @@ export interface Layer<Provides, E = never, Needs = never> {
 }
 
 // The shape each combinator records for `Layer.describe` / `Layer.toDot`. `needs` is the set of
-// service keys a node reads WHEN KNOWN AT RUNTIME — `value` (none), `class` / `service` (the
-// dep list). It is `undefined` for `factory` / `make` / `acquireRelease` / `member`, whose
-// per-service requirements live only in the erased `Needs` type; their edges are INFERRED from
-// the `provideTo` composition instead (what they were fed), which is exact about the wiring
+// service keys a node reads WHEN KNOWN AT RUNTIME — `value` (none), `class` / `service` / `inject`
+// (the dep list / record). It is `undefined` for `factory` / `make` / `acquireRelease` / `member`,
+// whose per-service requirements live only in the erased `Needs` type; their edges are INFERRED
+// from the `provideTo` composition instead (what they were fed), which is exact about the wiring
 // though it may over-approximate actual usage.
 export type LayerMeta =
   | {
@@ -168,7 +168,11 @@ export type LayerMeta =
       readonly key: string;
       readonly needs?: readonly string[];
     }
-  | { readonly kind: "class" | "service"; readonly key: string; readonly needs: readonly string[] }
+  | {
+      readonly kind: "class" | "service" | "inject";
+      readonly key: string;
+      readonly needs: readonly string[];
+    }
   | { readonly kind: "collect"; readonly key: string; readonly members: readonly Layer<any, any, any>[] }
   | { readonly kind: "merge"; readonly children: readonly Layer<any, any, any>[] }
   | { readonly kind: "provideTo"; readonly self: Layer<any, any, any>; readonly dep: Layer<any, any, any> }
@@ -470,6 +474,41 @@ const fromService = <Self, Id extends string, R extends Record<string, Tag<any, 
   };
 };
 
+// Build a service by injecting a RECORD of dependencies into a plain function — the
+// FUNCTION-shaped injection sugar beside `Layer.class` (tag list → constructor) and
+// `Service` (fused class). The record IS the boundary declaration: `Needs` is the union of
+// its tags' identities (nothing is inferred from usage), and — being runtime-known — it
+// gives `inject` EXACT introspection edges, like `class` / `Service` and unlike `factory`.
+// `f` also receives the typed context; it exists to serve as a `forkScope` parent (an
+// injected service, e.g. an HTTP app, opens request scopes from it) and is typed by the
+// same record-derived `Needs`, so it adds no undeclared capability. Sync and infallible
+// like `factory`: `f` runs inside `.map`, so a throw becomes a `Defect`; `E = never`.
+const inject = <Self, Service, const R extends Record<string, Tag<any, any>>>(
+  tag: Tag<Self, Service>,
+  deps: R,
+  f: (deps: InjectedOf<R>, ctx: Context<NeedsOfRecord<R>>) => Service,
+): Layer<Self, never, NeedsOfRecord<R>> => ({
+  build: (ctx) =>
+    Ok<void>(undefined)
+      .toAsync()
+      .map(() => {
+        const injected: Record<string, unknown> = {};
+        for (const key of Object.keys(deps)) {
+          injected[key] = (ctx as Context<any>).get(deps[key] as Tag<any, any>);
+        }
+        return unsafeAdd(
+          emptyAny(),
+          tag.key,
+          f(injected as InjectedOf<R>, ctx as Context<NeedsOfRecord<R>>),
+        );
+      }),
+  meta: {
+    kind: "inject",
+    key: tag.key,
+    needs: Object.values(deps).map((t) => (t as Tag<any, any>).key),
+  },
+});
+
 // Distribute over a union of layers to collect each channel as a union. Naked
 // type parameters, so applying them to `Ls[number]` distributes over the tuple.
 type ProvidesOf<L> = L extends Layer<infer P, any, any> ? P : never;
@@ -541,8 +580,8 @@ const collect = <Self, Item, Ms extends readonly Layer<Self, any, any>[]>(
 // Graph introspection — a read-only debugging aid. `describe` walks the recorded
 // structural `meta` (see `LayerMeta`) into a normalized node/edge model; `toDot`
 // renders it as Graphviz DOT. NO factories run — this reflects the composed STRUCTURE,
-// not a live build. Edges are EXACT for value / class / Service (needs known at runtime)
-// and INFERRED from the `provideTo` composition for factory / make / acquireRelease /
+// not a live build. Edges are EXACT for value / class / Service / inject (needs known at
+// runtime) and INFERRED from the `provideTo` composition for factory / make / acquireRelease /
 // member (whose per-service needs are erased) — the inferred edges show the wiring, and may
 // over-approximate usage. A hand-built `{ build }` layer (no meta) contributes nothing.
 // ---------------------------------------------------------------------------
@@ -730,11 +769,12 @@ const forkScope = <Parent, ReqP, E, A, E2>(
 // Context constructors. (Reading a service is the instance method `ctx.get(tag)`.)
 export const Context = { empty };
 
-// Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member` / `class`),
-// combinators (`merge` / `provideTo` / `collect` / `onStart` / `onStop`), the introspection
-// aids (`describe` / `toDot`), and the terminals `build` / `scoped` / `forkScope`. `class` is
-// constructor-injection sugar over `factory`; `fromService` builds the Layer for a `Service`
-// subclass (which is exported top-level, alongside `Tag`). Assembly is
+// Layer constructors (`value` / `factory` / `make` / `acquireRelease` / `member` / `class` /
+// `inject`), combinators (`merge` / `provideTo` / `collect` / `onStart` / `onStop`), the
+// introspection aids (`describe` / `toDot`), and the terminals `build` / `scoped` / `forkScope`.
+// `class` is constructor-injection sugar over `factory` from a TAG LIST; `inject` is the same
+// idea for a function-shaped service, injecting a dependency RECORD instead; `fromService` builds
+// the Layer for a `Service` subclass (which is exported top-level, alongside `Tag`). Assembly is
 // single-pass and fully type-checked: you compose a graph by hand with `provideTo` / `merge`
 // (there is no runtime auto-wiring).
 export const Layer = {
@@ -745,6 +785,7 @@ export const Layer = {
   member,
   class: classLayer,
   fromService,
+  inject,
   merge,
   provideTo,
   collect,
