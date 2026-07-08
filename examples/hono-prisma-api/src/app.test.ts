@@ -7,16 +7,16 @@
 
 import { describe, expect, it } from "vitest";
 
-import { type Context, Layer, type ServiceOf, Tag } from "demesne";
+import { type Context, Layer, type ServiceOf } from "demesne";
 import type { Hono } from "hono";
 import { Err, Ok, type Result } from "unthrown";
 
-import { GetTodo } from "./application/get-todo.js";
 import { AuditSinks } from "./application/plugins.js";
-import { TodoRepository } from "./application/ports.js";
+import { Logger, TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
 import { buildRoutes } from "./http/routes.js";
+import { RequestId, RequestLogger, RequestScopeLive } from "./http/request.js";
 
 // An in-memory stand-in for the Prisma-backed repository — same port, no I/O.
 const makeFakeRepo = (): ServiceOf<TodoRepository> => {
@@ -138,21 +138,25 @@ describe("combinators on the same app", () => {
     expect(ctx.get(AuditSinks).map((sink) => sink.name)).toEqual(["console", "in-memory"]);
   });
 
-  it("forkScope layers a per-request scope on the built app", async () => {
-    const app = (await Layer.build(fakeApp())).unwrap();
+  it("request scope: fresh RequestId per fork, request-tagged logger", async () => {
+    const lines: string[] = [];
+    const parent = (
+      await Layer.build(Layer.value(Logger, { info: (msg) => lines.push(msg) }))
+    ).unwrap();
 
-    class RequestId extends Tag("RequestId")<RequestId, { readonly id: string }>() {}
-    const RequestLayer = Layer.factory(RequestId, () => ({ id: "req-7" }));
+    const idOf = async (): Promise<string> =>
+      (
+        await Layer.forkScope(parent, RequestScopeLive, (ctx): Result<string, never> => {
+          ctx.get(RequestLogger).info("hello");
+          return Ok(ctx.get(RequestId).id);
+        })
+      ).unwrap();
 
-    const out = await Layer.forkScope(
-      app,
-      RequestLayer,
-      // the fork sees the parent's services (GetTodo) PLUS the request-scoped RequestId
-      (ctx): Result<string, never> =>
-        Ok(`${ctx.get(RequestId).id}:${typeof ctx.get(GetTodo).execute}`),
-    );
+    const first = await idOf();
+    const second = await idOf();
 
-    expect(out.unwrap()).toBe("req-7:function");
+    expect(first).not.toBe(second); // fresh instances per fork
+    expect(lines).toEqual([`[${first}] hello`, `[${second}] hello`]);
   });
 
   it("onStop runs a teardown when the scope closes", async () => {
