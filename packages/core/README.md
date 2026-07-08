@@ -44,9 +44,12 @@ const dbUrl = result.match({
   is wired (`Needs = never`).
 - **Errors as a static union** — every way construction can fail is in the result
   type, handled once at the edge as an `unthrown` `AsyncResult`.
-- **`Tag` / `Context` / `Layer`** — operations grouped under `Layer.*`
-  (`value` / `factory` / `make`, `merge` / `provideTo` / `build`) and `Context.*`
-  (`empty`).
+- **`Tag` / `Context` / `Layer`** — operations grouped under `Layer.*` (constructors
+  `value` / `factory` / `make` / `class` / `fromService`, resources `acquireRelease`,
+  multi-bindings `member` / `collect`, lifecycle `onStart` / `onStop`, composition
+  `merge` / `provideTo`, introspection `describe` / `toDot`, terminals
+  `build` / `scoped` / `forkScope`) and `Context.*` (`empty`). `Tag`, `Service` (a
+  self-injecting service class) and the `ServiceOf` helper stay top-level.
 - `unthrown` is a peer dependency; demesne does the wiring, `unthrown` the errors.
 
 See the [project README](https://github.com/btravstack/demesne#readme) for the full

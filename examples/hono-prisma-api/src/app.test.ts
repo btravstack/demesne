@@ -2,8 +2,8 @@
 // (src/app.ts) — the identical wiring, use cases, plugins and routes — swapping only the
 // repository for an in-memory fake. Because the application depends on the `TodoRepository`
 // *port*, the fake drops in without Prisma or Postgres. The first block drives the real Hono
-// app over HTTP; the second exercises the wired combinators (collect / override / forkScope /
-// onStop) on that same app.
+// app over HTTP; the second exercises the combinators (collect / forkScope / onStop) on that
+// same app.
 
 import { describe, expect, it } from "vitest";
 

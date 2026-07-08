@@ -2,15 +2,21 @@
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": ["**/.env.*local"],
   "tasks": {
-    "lint": {
-      "dependsOn": ["^build"]
-    },
-    "format": {},
     "typecheck": {
       "dependsOn": ["^build"]
     },
     "test": {
       "dependsOn": ["^build"],
+      "cache": false
+    },
+    "prisma:generate": {
+      "cache": false
+    },
+    "@demesne-examples/hono-prisma-api#typecheck": {
+      "dependsOn": ["^build", "prisma:generate"]
+    },
+    "@demesne-examples/hono-prisma-api#test": {
+      "dependsOn": ["^build", "prisma:generate"],
       "cache": false
     },
     "dev": {

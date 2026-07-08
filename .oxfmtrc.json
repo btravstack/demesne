@@ -2,8 +2,10 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
     "pnpm-lock.yaml",
-    "**/docs/**",
-    "docs/**",
+    "packages/*/docs/**",
+    "docs/api/core/**",
+    "docs/.vitepress/dist/**",
+    "docs/.vitepress/cache/**",
     "packages/core/src/index.ts",
     "**/generated/**"
   ],

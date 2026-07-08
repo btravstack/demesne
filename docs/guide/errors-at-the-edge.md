@@ -37,9 +37,12 @@ realistically does an async, fallible lookup, so it returns an `AsyncResult` —
 bare `Order | null`:
 
 ```ts
-class OrderRepository extends Tag("OrderRepository")<OrderRepository, {
-  readonly findById: (id: string) => AsyncResult<Order, OrderNotFound>;
-}>() {}
+class OrderRepository extends Tag("OrderRepository")<
+  OrderRepository,
+  {
+    readonly findById: (id: string) => AsyncResult<Order, OrderNotFound>;
+  }
+>() {}
 ```
 
 So once the graph is built, you handle a **second** unthrown result, one level down:

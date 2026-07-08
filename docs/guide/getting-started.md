@@ -70,7 +70,10 @@ factory), type-checked against the constructor. `Layer.provideTo` feeds one laye
 import { Layer, type ServiceOf, Tag } from "demesne";
 // ...continuing from above (AppConfig / ConfigLive), plus `ServiceOf` in the import.
 
-class Database extends Tag("Database")<Database, { readonly query: (sql: string) => unknown[] }>() {}
+class Database extends Tag("Database")<
+  Database,
+  { readonly query: (sql: string) => unknown[] }
+>() {}
 
 // A plain class — no demesne import — that needs AppConfig in its constructor.
 class PgDatabase {

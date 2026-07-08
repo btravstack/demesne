@@ -4,7 +4,8 @@
   "ignore": ["**/*.test-d.ts"],
   "workspaces": {
     "packages/*": {
-      "project": ["src/**/*.ts"]
+      "project": ["src/**/*.ts"],
+      "ignoreDependencies": ["typedoc-plugin-markdown", "@demesne/typedoc"]
     },
     "examples/*": {
       "project": ["src/**/*.ts"]
@@ -17,6 +18,5 @@
       "entry": ["scripts/*.ts"],
       "project": ["scripts/**/*.ts"]
     }
-  },
-  "ignoreDependencies": ["typedoc-plugin-markdown", "@demesne/typedoc"]
+  }
 }

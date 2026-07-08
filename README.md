@@ -74,9 +74,11 @@ Three concepts:
   from `Needs`. You can `Layer.build` only once `Needs` is `never`.
 
 Operations are grouped under two namespaces so call sites read unambiguously:
-`Layer.*` (constructors, combinators, `build`) and `Context.*` (`empty`). `Context`
-and `Layer` are each both a **type** and a **value** — `Context<R>` / `Context.empty()`,
-`Layer<P, E, N>` / `Layer.make(...)`. `Tag` stays top-level.
+`Layer.{value, factory, make, acquireRelease, member, class, fromService, merge,
+provideTo, collect, onStart, onStop, describe, toDot, build, scoped, forkScope}` and
+`Context.{empty}`. `Context` and `Layer` are each both a **type** and a **value** —
+`Context<R>` / `Context.empty()`, `Layer<P, E, N>` / `Layer.make(...)`. `Tag` and
+`Service` stay top-level.
 
 Layer constructors, by how construction is qualified:
 
@@ -387,8 +389,8 @@ const PoolLive = Layer.acquireRelease(
 );
 //    ^? Layer<Pool, PoolError, Scope>
 
-// Layer.build(provideTo(RepoLive, PoolLive))  // ❌ compile error: needs a Scope
-const summary = await Layer.scoped(provideTo(RepoLive, PoolLive), (ctx) =>
+// Layer.build(Layer.provideTo(RepoLive, PoolLive))  // ❌ compile error: needs a Scope
+const summary = await Layer.scoped(Layer.provideTo(RepoLive, PoolLive), (ctx) =>
   ctx.get(OrderRepository).findById("order-1"),
 );
 // pool is closed here, even if findById failed
@@ -400,7 +402,9 @@ The wiring core is complete: requirements and errors as static unions, single-pa
 hand-threaded assembly (`provideTo` / variadic `merge`), namespaced API, memoization, scoped
 resources, **type-level scope enforcement** (the compiler rejects a resource graph passed to
 `build`), **request / child scopes** (`Layer.forkScope`), **multi-bindings** (`Layer.member` /
-`Layer.collect`), and **lifecycle hooks** (`Layer.onStart` / `Layer.onStop`). (An earlier
+`Layer.collect`), **lifecycle hooks** (`Layer.onStart` / `Layer.onStop`), **constructor
+injection** (`Layer.class` / `Service` + `Layer.fromService`), and **graph introspection**
+(`Layer.describe` / `Layer.toDot`). (An earlier
 `Layer.wire` / `Layer.override` — the only runtime-resolution parts — was removed as at odds
 with the compile-time thesis.) Further ideas live in [`CLAUDE.md`](./CLAUDE.md).
 

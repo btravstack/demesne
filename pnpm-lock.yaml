@@ -122,6 +122,9 @@ importers:
       demesne:
         specifier: workspace:*
         version: link:../packages/core
+      unthrown:
+        specifier: 'catalog:'
+        version: 3.0.0
     devDependencies:
       '@btravstack/theme':
         specifier: 'catalog:'

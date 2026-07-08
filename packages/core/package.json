@@ -50,10 +50,10 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsdown src/index.ts --format cjs,esm --dts --clean",
+    "build": "tsdown",
     "build:docs": "typedoc",
     "check:package": "publint --strict && attw --pack .",
-    "dev": "tsdown src/index.ts --format cjs,esm --dts --watch",
+    "dev": "tsdown --watch",
     "test": "vitest run",
     "test:types": "tsc --noEmit -p tsconfig.test-d.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test-d.json"

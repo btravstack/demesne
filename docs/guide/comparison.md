@@ -7,18 +7,18 @@ that also models **construction failures as values**.
 
 ## At a glance
 
-|                                 | **demesne**                | **Effect** (`Layer`)     | **InversifyJS / tsyringe** | **typed-inject**   | **NestJS DI**       |
-| ------------------------------- | -------------------------- | ------------------------ | -------------------------- | ------------------ | ------------------- |
-| Wiring model                    | typed `Layer` algebra      | typed `Layer` (in a monad) | container + bindings     | typed provider chain | module + providers |
-| Missing dependency              | **compile error**          | **compile error**        | ❌ runtime throw           | **compile error**  | ❌ runtime throw    |
-| Decorators / `reflect-metadata` | ❌ none                    | ❌ none                  | ✅ required                | ❌ none            | ✅ required         |
-| Construction errors             | **typed union `E`**        | in the effect's `E`      | throws                     | throws             | throws              |
-| Resource scopes (acquire/release) | ✅ `acquireRelease` + type-enforced `scoped` | ✅ `Scope` | ✅ (runtime scopes) | ❌ | ✅ (`OnModuleDestroy`) |
-| Requirements tracking           | declared at boundaries     | inferred (`R` channel)   | implicit                   | inferred           | implicit            |
-| Async construction              | ✅ (parallel via `merge`)  | ✅                       | partial                    | ❌                 | ✅                  |
-| Runtime model                   | none (builds to `AsyncResult`) | a full effect runtime | a container                | a container        | a container         |
-| Lifetimes                       | singleton-per-build (memoized) | scoped / global      | singleton/transient/request | singleton         | singleton/request/transient |
-| Footprint                       | tiny, 0 runtime deps       | large                    | small–medium               | tiny               | large (framework)   |
+|                                   | **demesne**                                  | **Effect** (`Layer`)       | **InversifyJS / tsyringe**  | **typed-inject**     | **NestJS DI**               |
+| --------------------------------- | -------------------------------------------- | -------------------------- | --------------------------- | -------------------- | --------------------------- |
+| Wiring model                      | typed `Layer` algebra                        | typed `Layer` (in a monad) | container + bindings        | typed provider chain | module + providers          |
+| Missing dependency                | **compile error**                            | **compile error**          | ❌ runtime throw            | **compile error**    | ❌ runtime throw            |
+| Decorators / `reflect-metadata`   | ❌ none                                      | ❌ none                    | ✅ required                 | ❌ none              | ✅ required                 |
+| Construction errors               | **typed union `E`**                          | in the effect's `E`        | throws                      | throws               | throws                      |
+| Resource scopes (acquire/release) | ✅ `acquireRelease` + type-enforced `scoped` | ✅ `Scope`                 | ✅ (runtime scopes)         | ❌                   | ✅ (`OnModuleDestroy`)      |
+| Requirements tracking             | declared at boundaries                       | inferred (`R` channel)     | implicit                    | inferred             | implicit                    |
+| Async construction                | ✅ (parallel via `merge`)                    | ✅                         | partial                     | ❌                   | ✅                          |
+| Runtime model                     | none (builds to `AsyncResult`)               | a full effect runtime      | a container                 | a container          | a container                 |
+| Lifetimes                         | singleton-per-build (memoized)               | scoped / global            | singleton/transient/request | singleton            | singleton/request/transient |
+| Footprint                         | tiny, 0 bundled deps (1 peer: `unthrown`)    | large                      | small–medium                | tiny                 | large (framework)           |
 
 ## The differences that actually matter
 

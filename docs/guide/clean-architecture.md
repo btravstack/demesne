@@ -37,13 +37,19 @@ import { Tag } from "demesne";
 import { type AsyncResult } from "unthrown";
 import type { Order, OrderNotFound } from "../domain/order.js";
 
-export class Logger extends Tag("Logger")<Logger, {
-  readonly log: (msg: string) => void;
-}>() {}
+export class Logger extends Tag("Logger")<
+  Logger,
+  {
+    readonly log: (msg: string) => void;
+  }
+>() {}
 
-export class OrderRepository extends Tag("OrderRepository")<OrderRepository, {
-  readonly findById: (id: string) => AsyncResult<Order, OrderNotFound>;
-}>() {}
+export class OrderRepository extends Tag("OrderRepository")<
+  OrderRepository,
+  {
+    readonly findById: (id: string) => AsyncResult<Order, OrderNotFound>;
+  }
+>() {}
 ```
 
 ## Application
@@ -106,9 +112,12 @@ import { type Order, OrderNotFound } from "../domain/order.js";
 import { Logger, OrderRepository } from "../application/ports.js";
 
 class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
-class Database extends Tag("Database")<Database, {
-  readonly query: (sql: string) => readonly unknown[];
-}>() {}
+class Database extends Tag("Database")<
+  Database,
+  {
+    readonly query: (sql: string) => readonly unknown[];
+  }
+>() {}
 
 class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
 class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
