@@ -1,28 +1,25 @@
-// Application — the "create todo" use case. It takes a validated input (the HTTP edge does
-// the zod body validation) and returns the created todo or a RepositoryError.
+// Application — the "create todo" use case, FUNCTION-shaped: the tag's service IS the
+// function type, and `Layer.inject` builds it from a deps record — no interactor class, no
+// hand-written factory, no `ctx.get`. The record declares the boundary (requirements are
+// declared, never inferred), and call sites invoke it directly: `ctx.get(CreateTodo)(input)`.
 
-import { Layer, type ServiceOf, Tag } from "demesne";
+import { Layer, Tag } from "demesne";
 import type { AsyncResult } from "unthrown";
 
 import type { NewTodo, RepositoryError, Todo } from "../domain/todo.js";
 import { Logger, TodoRepository } from "./ports.js";
 
-class CreateTodoInteractor {
-  constructor(
-    private readonly logger: ServiceOf<Logger>,
-    private readonly todos: ServiceOf<TodoRepository>,
-  ) {}
-
-  execute(input: NewTodo): AsyncResult<Todo, RepositoryError> {
-    this.logger.info(`creating todo "${input.title}"`);
-    return this.todos.create(input);
-  }
-}
-
-export class CreateTodo extends Tag("CreateTodo")<CreateTodo, CreateTodoInteractor>() {}
-
-export const CreateTodoLive = Layer.class(
+export class CreateTodo extends Tag("CreateTodo")<
   CreateTodo,
-  [Logger, TodoRepository],
-  CreateTodoInteractor,
+  (input: NewTodo) => AsyncResult<Todo, RepositoryError>
+>() {}
+
+export const CreateTodoLive = Layer.inject(
+  CreateTodo,
+  { logger: Logger, todos: TodoRepository },
+  ({ logger, todos }) =>
+    (input) => {
+      logger.info(`creating todo "${input.title}"`);
+      return todos.create(input);
+    },
 );

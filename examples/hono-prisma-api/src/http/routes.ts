@@ -21,7 +21,7 @@ export const buildRoutes = (
   const app = new Hono();
 
   app.get("/todos", async (c) =>
-    (await ctx.get(ListTodos).execute()).match<Response>({
+    (await ctx.get(ListTodos)()).match<Response>({
       ok: (todos) => c.json(todos),
       err: (error) => c.json({ error: error._tag }, 500),
       defect: () => c.json({ error: "internal error" }, 500),
@@ -47,7 +47,7 @@ export const buildRoutes = (
         400,
       );
     }
-    return (await ctx.get(CreateTodo).execute(body.data)).match<Response>({
+    return (await ctx.get(CreateTodo)(body.data)).match<Response>({
       ok: (todo) => {
         // fan the event out to every audit sink (the multi-binding collection)
         for (const sink of ctx.get(AuditSinks)) sink.record({ action: "create", detail: todo.id });

@@ -1,26 +1,24 @@
-// Application — the "list todos" use case. Constructor-injected ports, one public `execute`
-// method, and NO demesne types inside the class. `Layer.class` does the injection from a deps
-// list — no hand-written factory, no `ctx.get` — while the class stays plain TS. The deps list
-// is type-checked against the constructor (wrong order / type / arity is a compile error).
+// Application — the "list todos" use case, function-shaped like create-todo.ts. Contrast
+// with get-todo.ts (`Service`): reach for a class when the service has state or several
+// methods; a one-method use case is just a function built from its ports.
 
-import { Layer, type ServiceOf, Tag } from "demesne";
+import { Layer, Tag } from "demesne";
 import type { AsyncResult } from "unthrown";
 
 import type { RepositoryError, Todo } from "../domain/todo.js";
 import { Logger, TodoRepository } from "./ports.js";
 
-class ListTodosInteractor {
-  constructor(
-    private readonly logger: ServiceOf<Logger>,
-    private readonly todos: ServiceOf<TodoRepository>,
-  ) {}
+export class ListTodos extends Tag("ListTodos")<
+  ListTodos,
+  () => AsyncResult<readonly Todo[], RepositoryError>
+>() {}
 
-  execute(): AsyncResult<readonly Todo[], RepositoryError> {
-    this.logger.info("listing todos");
-    return this.todos.list();
-  }
-}
-
-export class ListTodos extends Tag("ListTodos")<ListTodos, ListTodosInteractor>() {}
-
-export const ListTodosLive = Layer.class(ListTodos, [Logger, TodoRepository], ListTodosInteractor);
+export const ListTodosLive = Layer.inject(
+  ListTodos,
+  { logger: Logger, todos: TodoRepository },
+  ({ logger, todos }) =>
+    () => {
+      logger.info("listing todos");
+      return todos.list();
+    },
+);
