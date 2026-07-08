@@ -8,14 +8,16 @@
 import { describe, expect, it } from "vitest";
 
 import { type Context, Layer, type ServiceOf } from "demesne";
-import { Err, Ok, type Result } from "unthrown";
+import { Err, fromSafePromise, Ok, type Result } from "unthrown";
 
 import { AuditSinks } from "./application/plugins.js";
 import { Logger, TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
+import { AppConfig } from "./config/env.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
 import { HttpApp } from "./http/routes.js";
 import { RequestId, RequestLogger, RequestScopeLive } from "./http/request.js";
+import { HttpServer, HttpServerLive } from "./http/server.js";
 
 // An in-memory stand-in for the Prisma-backed repository — same port, no I/O.
 const makeFakeRepo = (): ServiceOf<TodoRepository> => {
@@ -186,5 +188,29 @@ describe("combinators on the same app", () => {
 
     expect(out.unwrap()).toBe(2);
     expect(events).toEqual(["closed"]);
+  });
+
+  it("the HTTP listener is a resource: serves inside the scope, closed after", async () => {
+    // PORT 0 → the OS assigns a free port; the acquired service reports the real one.
+    const TestConfig = Layer.value(AppConfig, {
+      DATABASE_URL: "postgres://unused",
+      PORT: 0,
+      LOG_LEVEL: "info",
+    });
+    const boot = fakeApp();
+    const withServer = Layer.merge(
+      boot,
+      Layer.provideTo(HttpServerLive, Layer.merge(boot, TestConfig)),
+    );
+
+    let url = "";
+    const out = await Layer.scoped(withServer, (ctx) => {
+      url = `http://127.0.0.1:${ctx.get(HttpServer).port}`;
+      return fromSafePromise(fetch(`${url}/todos`).then((res) => res.status));
+    });
+
+    expect(out.unwrap()).toBe(200);
+    // the scope has closed → the listener is released and the port refuses connections
+    await expect(fetch(`${url}/todos`)).rejects.toThrow();
   });
 });
