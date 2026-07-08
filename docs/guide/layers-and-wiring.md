@@ -108,6 +108,47 @@ to a `const` and reuse that so the shared service builds once (see "Shared layer
 below), rather than calling `Layer.fromService` at each use site.
 :::
 
+### `Layer.inject` — function-shaped services
+
+Not every service wants to be a class. A one-method use case is morally a function — and
+`Layer.inject` builds one from a **deps record**, with no interactor class, no
+hand-annotated `Context<...>`, and no `ctx.get` lines:
+
+```ts
+class CreateTodo extends Tag("CreateTodo")<
+  CreateTodo,
+  (input: NewTodo) => AsyncResult<Todo, RepositoryError>
+>() {}
+
+const CreateTodoLive = Layer.inject(
+  CreateTodo,
+  { logger: Logger, todos: TodoRepository },
+  ({ logger, todos }) =>
+    (input) => {
+      logger.info(`creating todo "${input.title}"`);
+      return todos.create(input);
+    },
+);
+
+// call it as a plain function:
+const todo = await ctx.get(CreateTodo)(input);
+```
+
+The record is the declared boundary — `Needs` is the union of its tags' identities — and
+because it is known at runtime, `inject` layers get **exact** edges in `Layer.describe` /
+`Layer.toDot` (solid, not dashed). Like `factory`, construction is sync and infallible: a
+throw becomes a `Defect`; a fallible or async construction belongs to `Layer.make`.
+
+The factory also receives the typed context as a second argument. Its purpose is to be a
+`forkScope` parent — an injected service that handles requests can open a per-request scope
+from its own context (see the hono-prisma example's HTTP app). It is typed by the same
+record-derived `Needs`, so it grants nothing the record didn't declare.
+
+The three injection sugars, side by side: `Layer.class` injects a **tag list** into a
+constructor you may not own; `Service` fuses tag + injected fields into **one class**
+declaration; `Layer.inject` injects a **record** into a plain function. Pick by the shape
+of the thing you're building.
+
 ## Qualify at the boundary
 
 Async / fallible work enters **only** through `Layer.make`. A raw `Promise` must never

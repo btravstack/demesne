@@ -74,7 +74,7 @@ Three concepts:
   from `Needs`. You can `Layer.build` only once `Needs` is `never`.
 
 Operations are grouped under two namespaces so call sites read unambiguously:
-`Layer.{value, factory, make, acquireRelease, member, class, fromService, merge,
+`Layer.{value, factory, make, acquireRelease, member, class, fromService, inject, merge,
 provideTo, collect, onStart, onStop, describe, toDot, build, scoped, forkScope}` and
 `Context.{empty}`. `Context` and `Layer` are each both a **type** and a **value** —
 `Context<R>` / `Context.empty()`, `Layer<P, E, N>` / `Layer.make(...)`. `Tag` and
