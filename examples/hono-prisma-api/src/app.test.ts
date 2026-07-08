@@ -8,14 +8,13 @@
 import { describe, expect, it } from "vitest";
 
 import { type Context, Layer, type ServiceOf } from "demesne";
-import type { Hono } from "hono";
 import { Err, Ok, type Result } from "unthrown";
 
 import { AuditSinks } from "./application/plugins.js";
 import { Logger, TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
-import { buildRoutes } from "./http/routes.js";
+import { HttpApp } from "./http/routes.js";
 import { RequestId, RequestLogger, RequestScopeLive } from "./http/request.js";
 
 // An in-memory stand-in for the Prisma-backed repository — same port, no I/O.
@@ -51,10 +50,15 @@ const makeFakeRepo = (): ServiceOf<TodoRepository> => {
 // The fake needs nothing, so this graph has no `Scope` and builds without a database.
 const fakeApp = () => bootstrap(Layer.value(TodoRepository, makeFakeRepo()));
 
-const buildTestApp = async () => buildRoutes((await Layer.build(fakeApp())).unwrap());
+// The app is a SERVICE now: bootstrap wires HttpAppLive, so tests read it from the context.
+const buildTestApp = async () => (await Layer.build(fakeApp())).unwrap().get(HttpApp);
 
 // Reduce a response to the single entity we assert on: its status and parsed body.
-const call = async (app: Hono, path: string, init?: RequestInit) => {
+const call = async (
+  app: Awaited<ReturnType<typeof buildTestApp>>,
+  path: string,
+  init?: RequestInit,
+) => {
   const res = await app.request(path, init);
   return { status: res.status, body: (await res.json()) as unknown };
 };
@@ -128,6 +132,16 @@ describe("todos api (HTTP)", () => {
         body: expect.objectContaining({ error: "invalid body" }),
       }),
     );
+  });
+
+  it("every response carries a fresh x-request-id (per-request forkScope)", async () => {
+    const app = await buildTestApp();
+
+    const first = await app.request("/todos");
+    const second = await app.request("/todos");
+
+    expect(first.headers.get("x-request-id")).toMatch(/[0-9a-f-]{36}/);
+    expect(first.headers.get("x-request-id")).not.toBe(second.headers.get("x-request-id"));
   });
 });
 

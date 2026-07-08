@@ -9,11 +9,11 @@ import { fromSafePromise, Ok, type Result } from "unthrown";
 
 import { AppStarted } from "./app.js";
 import { AppConfig } from "./config/env.js";
-import { buildRoutes } from "./http/routes.js";
+import { HttpApp } from "./http/routes.js";
 
 const outcome = await Layer.scoped(AppStarted, (ctx) => {
   const port = ctx.get(AppConfig).PORT;
-  const app = buildRoutes(ctx);
+  const app = ctx.get(HttpApp);
 
   return fromSafePromise(
     new Promise<Result<void, never>>((resolve) => {

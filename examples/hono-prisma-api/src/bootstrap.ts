@@ -13,6 +13,7 @@ import { GetTodoLive } from "./application/get-todo.js";
 import { ListTodosLive } from "./application/list-todos.js";
 import { AuditSinksLive } from "./application/plugins.js";
 import { TodoRepository } from "./application/ports.js";
+import { HttpAppLive } from "./http/routes.js";
 import { LoggerLive } from "./infra/logger.js";
 
 // Generic over the whole repository layer so its provisions/errors/requirements flow into the
@@ -21,12 +22,14 @@ import { LoggerLive } from "./infra/logger.js";
 export const bootstrap = <R extends Layer<TodoRepository, unknown, unknown>>(repository: R) => {
   // the audit collection reads Logger (its console sink); discharge that need up front
   const audit = Layer.provideTo(AuditSinksLive, LoggerLive);
-  // the use cases each need Logger + TodoRepository — feed both in. GetTodo is a `Service`
-  // (its layer is `Layer.fromService(GetTodo)`, exported as `GetTodoLive`); the other two are
-  // `Layer.class` layers.
+  // the use cases each need Logger + TodoRepository — feed both in. GetTodo is a `Service`;
+  // ListTodos / CreateTodo are function-shaped `Layer.inject` layers.
   const useCases = Layer.merge(ListTodosLive, GetTodoLive, CreateTodoLive);
   const useCasesWired = Layer.provideTo(useCases, Layer.merge(LoggerLive, repository));
-  // expose Logger, the audit collection, the repository (and whatever else it provides), and
-  // the wired use cases; shared layers (LoggerLive, the repository) build once (memoized).
-  return Layer.merge(LoggerLive, audit, repository, useCasesWired);
+  // the HTTP app is itself a service: inject the wired use cases, the audit collection,
+  // and the Logger (which is also the fork parent for the per-request scope).
+  const httpWired = Layer.provideTo(HttpAppLive, Layer.merge(useCasesWired, audit, LoggerLive));
+  // expose everything; shared layers (LoggerLive, the repository, the wired use cases)
+  // build once (memoized by reference).
+  return Layer.merge(LoggerLive, audit, repository, useCasesWired, httpWired);
 };
