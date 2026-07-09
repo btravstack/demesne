@@ -4,7 +4,7 @@
 // disconnects Prisma on shutdown) — `Layer.build` would be a compile error.
 
 import { type Context, Layer } from "demesne";
-import { type AsyncResult, fromPromise, TaggedError } from "unthrown";
+import { type AsyncResult, TaggedError } from "unthrown";
 
 import { ConfigLive } from "./config/env.js";
 import { HttpServerLive } from "./http/server.js";
@@ -39,7 +39,9 @@ export const AppLayer = Layer.merge(boot, Layer.provideTo(HttpServerLive, boot))
 export const AppStarted = Layer.onStart(
   AppLayer,
   (ctx: Context<Database>): AsyncResult<void, MigrationError> =>
-    fromPromise(ctx.get(Database).todo.count(), (cause) => new MigrationError({ cause })).map(
-      () => undefined,
-    ),
+    ctx
+      .get(Database)
+      .todo.tryCount()
+      .mapErr((cause) => new MigrationError({ cause }))
+      .map(() => undefined),
 );

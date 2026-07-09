@@ -3,6 +3,8 @@
 // the graph carries `Scope` in its requirements and can only be run with `Layer.scoped`
 // (which closes the pool on shutdown). Prisma 7 uses a driver adapter (`@prisma/adapter-pg`)
 // over `pg`, and the connection URL is passed to the client here, not baked into the schema.
+// The client is `$extends`ed with the unthrown bridge at construction, so what the container
+// holds — and every consumer sees — is the extended client with the `try*` methods.
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { type Context, Layer, Tag } from "demesne";
@@ -10,8 +12,12 @@ import { fromPromise, TaggedError } from "unthrown";
 
 import { AppConfig } from "../config/env.js";
 import { PrismaClient } from "../generated/prisma/client.ts";
+import { unthrownPrisma } from "./unthrown-prisma.js";
 
-export class Database extends Tag("Database")<Database, PrismaClient>() {}
+const makeClient = (connectionString: string) =>
+  new PrismaClient({ adapter: new PrismaPg({ connectionString }) }).$extends(unthrownPrisma);
+
+export class Database extends Tag("Database")<Database, ReturnType<typeof makeClient>>() {}
 
 export class ConnectionError extends TaggedError("ConnectionError")<{ cause: unknown }> {}
 
@@ -20,8 +26,7 @@ export class ConnectionError extends TaggedError("ConnectionError")<{ cause: unk
 export const DatabaseLive = Layer.acquireRelease(
   Database,
   (ctx: Context<AppConfig>) => {
-    const adapter = new PrismaPg({ connectionString: ctx.get(AppConfig).DATABASE_URL });
-    const client = new PrismaClient({ adapter });
+    const client = makeClient(ctx.get(AppConfig).DATABASE_URL);
     return fromPromise(
       client.$connect().then(() => client),
       (cause) => new ConnectionError({ cause }),
