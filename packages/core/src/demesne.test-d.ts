@@ -269,3 +269,32 @@ const describedGraph = Layer.describe(anyLayer);
 type _describedGraph = Expect<Equal<typeof describedGraph, LayerGraph>>;
 const describedDot = Layer.toDot(anyLayer);
 type _describedDot = Expect<Equal<typeof describedDot, string>>;
+
+// --- 11. Layer.inject: record-injection for function-shaped services ---------
+
+type Greeter = (name: string) => string;
+class GreeterTag extends Tag("GreeterTag")<GreeterTag, Greeter>() {}
+
+// Needs = union of the record's identities; deps and ctx are typed from the record.
+const greeterLive = Layer.inject(GreeterTag, { a: ServiceA, b: ServiceB }, ({ a, b }, ctx) => {
+  type _depA = Expect<Equal<typeof a, { readonly a: string }>>;
+  type _ctx = Expect<Equal<typeof ctx, Context<ServiceA | ServiceB>>>;
+  return (name) => `${name}:${a.a}:${b.b}`;
+});
+type _greeterLive = Expect<
+  Equal<typeof greeterLive, Layer<GreeterTag, never, ServiceA | ServiceB>>
+>;
+
+// An empty record needs nothing and cannot fail.
+const constGreeter = Layer.inject(GreeterTag, {}, () => (name: string) => name);
+type _constGreeter = Expect<Equal<typeof constGreeter, Layer<GreeterTag, never, never>>>;
+
+// @ts-expect-error - f must return the tag's service shape (a Greeter, not a number).
+Layer.inject(GreeterTag, { a: ServiceA }, () => 42);
+
+// A dep's service shape governs what f can do with it — an unknown member is rejected.
+Layer.inject(GreeterTag, { a: ServiceA }, ({ a }) => {
+  // @ts-expect-error - notAField does not exist on ServiceA's service shape.
+  void a.notAField;
+  return (name: string) => name;
+});

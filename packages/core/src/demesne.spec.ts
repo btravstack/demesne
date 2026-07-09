@@ -1090,3 +1090,88 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
     expect(log).toEqual(["use", "stop:db", "stop:config"]);
   });
 });
+
+describe("Layer.inject: record-injection for function-shaped services", () => {
+  class Greet extends Tag("Greet")<Greet, (name: string) => string>() {}
+
+  it("resolves the deps record and builds the service from it", async () => {
+    const logs: string[] = [];
+    const GreetLive = Layer.inject(
+      Greet,
+      { logger: LoggerService, config: AppConfig },
+      ({ logger, config }) =>
+        (name) => {
+          logger.log(`greeting ${name}`);
+          return `${name}@${config.dbUrl}`;
+        },
+    );
+    const wired = Layer.provideTo(
+      GreetLive,
+      Layer.merge(
+        Layer.value(LoggerService, { log: (m) => logs.push(m) }),
+        Layer.value(AppConfig, { dbUrl: "postgres://localhost/app" }),
+      ),
+    );
+
+    const ctx = (await Layer.build(wired)).unwrap();
+
+    expect(ctx.get(Greet)("ada")).toBe("ada@postgres://localhost/app");
+    expect(logs).toEqual(["greeting ada"]);
+  });
+
+  it("an empty record needs nothing", async () => {
+    const ConstGreet = Layer.inject(Greet, {}, () => (name) => `hi ${name}`);
+
+    const ctx = (await Layer.build(ConstGreet)).unwrap();
+
+    expect(ctx.get(Greet)("bob")).toBe("hi bob");
+  });
+
+  it("a throw in the factory becomes a Defect (build resolves, never rejects)", async () => {
+    const Boom = Layer.inject(Greet, {}, (): ((name: string) => string) => {
+      throw new Error("inject boom");
+    });
+
+    const result = await Layer.build(Boom);
+
+    expect(result.isDefect()).toBe(true);
+  });
+
+  it("the ctx argument is a legal forkScope parent", async () => {
+    class Seq extends Tag("InjectSeq")<Seq, { readonly n: number }>() {}
+    let count = 0;
+    const SeqLive = Layer.make(Seq, (): Result<{ readonly n: number }, never> => {
+      count += 1;
+      return Ok({ n: count });
+    });
+
+    class Forker extends Tag("Forker")<Forker, () => AsyncResult<number, never>>() {}
+    const ForkerLive = Layer.inject(
+      Forker,
+      { logger: LoggerService },
+      (_deps, ctx) => () =>
+        Layer.forkScope(ctx, SeqLive, (req): Result<number, never> => Ok(req.get(Seq).n)),
+    );
+
+    const wired = Layer.provideTo(ForkerLive, Layer.value(LoggerService, { log: () => {} }));
+    const forker = (await Layer.build(wired)).unwrap().get(Forker);
+
+    expect((await forker()).unwrap()).toBe(1);
+    expect((await forker()).unwrap()).toBe(2); // fresh instance per fork
+  });
+
+  it("records exact needs for introspection (kind inject, solid edges)", () => {
+    const GreetLive = Layer.inject(Greet, { logger: LoggerService }, ({ logger }) => (name) => {
+      logger.log(name);
+      return name;
+    });
+    const wired = Layer.provideTo(GreetLive, Layer.value(LoggerService, { log: () => {} }));
+
+    const graph = Layer.describe(wired);
+
+    expect(graph.nodes.find((n) => n.key === "Greet")?.kind).toBe("inject");
+    expect(graph.edges).toContainEqual({ from: "Greet", to: "LoggerService", inferred: false });
+    // exact edge → NOT dashed in DOT
+    expect(Layer.toDot(wired)).toContain('"Greet" -> "LoggerService";');
+  });
+});

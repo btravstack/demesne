@@ -7,16 +7,17 @@
 
 import { describe, expect, it } from "vitest";
 
-import { type Context, Layer, type ServiceOf, Tag } from "demesne";
-import type { Hono } from "hono";
-import { Err, Ok, type Result } from "unthrown";
+import { type Context, Layer, type ServiceOf } from "demesne";
+import { Err, fromSafePromise, Ok, type Result } from "unthrown";
 
-import { GetTodo } from "./application/get-todo.js";
 import { AuditSinks } from "./application/plugins.js";
-import { TodoRepository } from "./application/ports.js";
+import { Logger, TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
+import { AppConfig } from "./config/env.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
-import { buildRoutes } from "./http/routes.js";
+import { HttpApp } from "./http/routes.js";
+import { RequestId, RequestLogger, RequestScopeLive } from "./http/request.js";
+import { HttpServer, HttpServerLive } from "./http/server.js";
 
 // An in-memory stand-in for the Prisma-backed repository — same port, no I/O.
 const makeFakeRepo = (): ServiceOf<TodoRepository> => {
@@ -51,10 +52,15 @@ const makeFakeRepo = (): ServiceOf<TodoRepository> => {
 // The fake needs nothing, so this graph has no `Scope` and builds without a database.
 const fakeApp = () => bootstrap(Layer.value(TodoRepository, makeFakeRepo()));
 
-const buildTestApp = async () => buildRoutes((await Layer.build(fakeApp())).unwrap());
+// The app is a SERVICE now: bootstrap wires HttpAppLive, so tests read it from the context.
+const buildTestApp = async () => (await Layer.build(fakeApp())).unwrap().get(HttpApp);
 
 // Reduce a response to the single entity we assert on: its status and parsed body.
-const call = async (app: Hono, path: string, init?: RequestInit) => {
+const call = async (
+  app: Awaited<ReturnType<typeof buildTestApp>>,
+  path: string,
+  init?: RequestInit,
+) => {
   const res = await app.request(path, init);
   return { status: res.status, body: (await res.json()) as unknown };
 };
@@ -129,6 +135,16 @@ describe("todos api (HTTP)", () => {
       }),
     );
   });
+
+  it("every response carries a fresh x-request-id (per-request forkScope)", async () => {
+    const app = await buildTestApp();
+
+    const first = await app.request("/todos");
+    const second = await app.request("/todos");
+
+    expect(first.headers.get("x-request-id")).toMatch(/[0-9a-f-]{36}/);
+    expect(first.headers.get("x-request-id")).not.toBe(second.headers.get("x-request-id"));
+  });
 });
 
 describe("combinators on the same app", () => {
@@ -138,21 +154,25 @@ describe("combinators on the same app", () => {
     expect(ctx.get(AuditSinks).map((sink) => sink.name)).toEqual(["console", "in-memory"]);
   });
 
-  it("forkScope layers a per-request scope on the built app", async () => {
-    const app = (await Layer.build(fakeApp())).unwrap();
+  it("request scope: fresh RequestId per fork, request-tagged logger", async () => {
+    const lines: string[] = [];
+    const parent = (
+      await Layer.build(Layer.value(Logger, { info: (msg) => lines.push(msg) }))
+    ).unwrap();
 
-    class RequestId extends Tag("RequestId")<RequestId, { readonly id: string }>() {}
-    const RequestLayer = Layer.factory(RequestId, () => ({ id: "req-7" }));
+    const idOf = async (): Promise<string> =>
+      (
+        await Layer.forkScope(parent, RequestScopeLive, (ctx): Result<string, never> => {
+          ctx.get(RequestLogger).info("hello");
+          return Ok(ctx.get(RequestId).id);
+        })
+      ).unwrap();
 
-    const out = await Layer.forkScope(
-      app,
-      RequestLayer,
-      // the fork sees the parent's services (GetTodo) PLUS the request-scoped RequestId
-      (ctx): Result<string, never> =>
-        Ok(`${ctx.get(RequestId).id}:${typeof ctx.get(GetTodo).execute}`),
-    );
+    const first = await idOf();
+    const second = await idOf();
 
-    expect(out.unwrap()).toBe("req-7:function");
+    expect(first).not.toBe(second); // fresh instances per fork
+    expect(lines).toEqual([`[${first}] hello`, `[${second}] hello`]);
   });
 
   it("onStop runs a teardown when the scope closes", async () => {
@@ -168,5 +188,29 @@ describe("combinators on the same app", () => {
 
     expect(out.unwrap()).toBe(2);
     expect(events).toEqual(["closed"]);
+  });
+
+  it("the HTTP listener is a resource: serves inside the scope, closed after", async () => {
+    // PORT 0 → the OS assigns a free port; the acquired service reports the real one.
+    const TestConfig = Layer.value(AppConfig, {
+      DATABASE_URL: "postgres://unused",
+      PORT: 0,
+      LOG_LEVEL: "info",
+    });
+    const boot = fakeApp();
+    const withServer = Layer.merge(
+      boot,
+      Layer.provideTo(HttpServerLive, Layer.merge(boot, TestConfig)),
+    );
+
+    let url = "";
+    const out = await Layer.scoped(withServer, (ctx) => {
+      url = `http://127.0.0.1:${ctx.get(HttpServer).port}`;
+      return fromSafePromise(fetch(`${url}/todos`).then((res) => res.status));
+    });
+
+    expect(out.unwrap()).toBe(200);
+    // the scope has closed → the listener is released and the port refuses connections
+    await expect(fetch(`${url}/todos`)).rejects.toThrow();
   });
 });

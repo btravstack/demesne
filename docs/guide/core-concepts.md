@@ -68,7 +68,7 @@ Both `Needs` and `E` accumulate as **unions**: `Layer.merge` widens them,
 
 Operations are grouped so call sites read unambiguously:
 
-- **`Layer.*`** — constructors (`value` / `factory` / `make` / `class` / `fromService`),
+- **`Layer.*`** — constructors (`value` / `factory` / `make` / `class` / `fromService` / `inject`),
   resources (`acquireRelease`), multi-bindings (`member` / `collect`), lifecycle hooks
   (`onStart` / `onStop`), composition (`merge` / `provideTo`), introspection
   (`describe` / `toDot`), and the terminals (`build` / `scoped` / `forkScope`).

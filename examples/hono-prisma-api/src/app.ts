@@ -7,6 +7,7 @@ import { type Context, Layer } from "demesne";
 import { type AsyncResult, fromPromise, TaggedError } from "unthrown";
 
 import { ConfigLive } from "./config/env.js";
+import { HttpServerLive } from "./http/server.js";
 import { Database, DatabaseLive } from "./infra/prisma.js";
 import { TodoRepoLive } from "./infra/todo-repository.js";
 import { bootstrap } from "./bootstrap.js";
@@ -21,13 +22,20 @@ class MigrationError extends TaggedError("MigrationError")<{ cause: unknown }> {
 const dbWired = Layer.provideTo(DatabaseLive, ConfigLive);
 const PrismaRepository = Layer.merge(ConfigLive, dbWired, Layer.provideTo(TodoRepoLive, dbWired));
 
-export const AppLayer = bootstrap(PrismaRepository);
+// `boot` bound once and shared by reference: the merge keeps the bootstrap provisions
+// (AppConfig for the port, Database for the health check, HttpApp) visible alongside the
+// listener, and the shared reference builds everything once.
+const boot = bootstrap(PrismaRepository);
+export const AppLayer = Layer.merge(boot, Layer.provideTo(HttpServerLive, boot));
 //    ^? Layer<Logger | AuditSinks | AppConfig | Database | TodoRepository | ListTodos
-//             | GetTodo | CreateTodo, ConfigError | ConnectionError, Scope>
+//             | GetTodo | CreateTodo | HttpApp | HttpServer,
+//             ConfigError | ConnectionError | ListenError, Scope>
 
-// Attach a startup check to the ASSEMBLED graph: it runs AFTER the whole graph is built (the
-// pool connected), before the app serves anything — a real query verifying the schema is
-// reachable. Being fallible/async, its error unions into the graph's `E`.
+// Attach a startup check to the ASSEMBLED graph: it runs AFTER the whole graph is built — the
+// listener (an `acquireRelease` inside `AppLayer`) is already accepting connections by then — a
+// real query verifying the schema is reachable, gating the entry point's `use`: a failed check
+// means `use` is skipped and the scope closes (listener + Prisma torn down). Being fallible/async,
+// its error unions into the graph's `E`.
 export const AppStarted = Layer.onStart(
   AppLayer,
   (ctx: Context<Database>): AsyncResult<void, MigrationError> =>

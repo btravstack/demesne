@@ -1,37 +1,32 @@
-// Entry point — run the assembled graph with `Layer.scoped`: build it (connecting Prisma),
-// serve the Hono app for the lifetime of `use`, and close the scope on shutdown (which
-// disconnects Prisma, LIFO). The server lifetime IS the scope: `use` resolves when a
-// SIGINT/SIGTERM arrives, after which teardown runs and the process exits.
+// Entry point — run the assembled graph with `Layer.scoped`: building it connects Prisma,
+// starts the HTTP listener (an `acquireRelease` resource), and runs the startup check.
+// `use` just waits for a shutdown signal; when it resolves, the scope closes and teardown
+// runs LIFO — the listener stops accepting, then Prisma disconnects. Every startup failure
+// is a static union handled once, below.
 
-import { serve } from "@hono/node-server";
 import { Layer } from "demesne";
-import { fromSafePromise, Ok, type Result } from "unthrown";
+import { fromSafePromise } from "unthrown";
 
 import { AppStarted } from "./app.js";
-import { AppConfig } from "./config/env.js";
-import { buildRoutes } from "./http/routes.js";
+import { Logger } from "./application/ports.js";
+
+const waitForShutdown = (): Promise<void> =>
+  new Promise((resolve) => {
+    const shutdown = (): void => {
+      console.log("shutting down…");
+      resolve();
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  });
 
 const outcome = await Layer.scoped(AppStarted, (ctx) => {
-  const port = ctx.get(AppConfig).PORT;
-  const app = buildRoutes(ctx);
-
-  return fromSafePromise(
-    new Promise<Result<void, never>>((resolve) => {
-      const server = serve({ fetch: app.fetch, port }, (info) => {
-        console.log(`todos api listening on http://localhost:${info.port}`);
-      });
-      const shutdown = (): void => {
-        console.log("shutting down…");
-        server.close(() => resolve(Ok(undefined)));
-      };
-      process.on("SIGINT", shutdown);
-      process.on("SIGTERM", shutdown);
-    }),
-  );
+  ctx.get(Logger).info("todos api ready");
+  return fromSafePromise(waitForShutdown());
 });
 
-// The scope has closed here — Prisma is disconnected — whether startup failed or the
-// server was stopped. Every startup failure is a static union handled once.
+// The scope has closed here — listener closed, Prisma disconnected — whether startup
+// failed or the server was stopped.
 outcome.match({
   ok: () => console.log("bye"),
   err: (error) =>
@@ -40,7 +35,9 @@ outcome.match({
         ? `config invalid: ${error.issues}`
         : error._tag === "MigrationError"
           ? `startup check failed: ${String(error.cause)}`
-          : `database unreachable: ${String(error.cause)}`,
+          : error._tag === "ListenError"
+            ? `could not listen: ${String(error.cause)}`
+            : `database unreachable: ${String(error.cause)}`,
     ),
   defect: (cause) => console.error(`panic: ${String(cause)}`),
 });
