@@ -50,7 +50,8 @@ prisma.config.ts               # Prisma 7 config (migrate connection URL)
   `app.ts` calls `bootstrap(prismaRepo)`, the tests call `bootstrap(fake)`, so both build the
   **same app** — only the storage differs, and the tests need no database. Parameterizing the
   graph like this is how you swap a real adapter for a fake. A startup check (`Layer.onStart`)
-  runs a real query before serving.
+  runs a real query after the graph is built (the listener is already accepting) and gates the
+  entry point's `use`.
 - **The HTTP edge is IN the DI.** `http/routes.ts` builds `HttpApp` — the Hono app itself — with
   `Layer.inject`, from the wired use cases, the audit collection and the Logger; a middleware
   opens a `Layer.forkScope` off the app's own context on every request (fresh `RequestId`, a

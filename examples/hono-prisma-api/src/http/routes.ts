@@ -32,13 +32,13 @@ class RequestFailed extends TaggedError("RequestFailed")<{ cause: unknown }> {}
 
 export class HttpApp extends Tag("HttpApp")<HttpApp, Hono<RequestEnv>>() {}
 
-// `logger` sits in the record for the FORK PARENT, not for direct use: RequestScopeLive
-// needs Logger, and the fork's parent is this layer's own ctx — so Logger must be in the
-// declared record for the fork to type-check.
+// `logger` sits in the record both as the FORK PARENT's dependency — RequestScopeLive needs
+// Logger, and the fork's parent is this layer's own ctx, so Logger must be in the declared
+// record for the fork to type-check — and to log the failure cause when a request fails.
 export const HttpAppLive = Layer.inject(
   HttpApp,
   { list: ListTodos, get: GetTodo, create: CreateTodo, audit: AuditSinks, logger: Logger },
-  ({ list, get, create, audit }, ctx) => {
+  ({ list, get, create, audit, logger }, ctx) => {
     const app = new Hono<RequestEnv>();
 
     // Per-request scope: fork off the app context, hand the forked context to handlers,
@@ -49,7 +49,10 @@ export const HttpAppLive = Layer.inject(
         c.header("x-request-id", reqCtx.get(RequestId).id);
         return fromPromise(next(), (cause) => new RequestFailed({ cause }));
       });
-      if (!out.isOk()) return c.json({ error: "internal error" }, 500);
+      if (!out.isOk()) {
+        logger.info(`request failed: ${String(out.isErr() ? out.unwrapErr().cause : "defect")}`);
+        return c.json({ error: "internal error" }, 500);
+      }
       return;
     });
 

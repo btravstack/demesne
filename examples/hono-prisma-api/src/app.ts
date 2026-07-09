@@ -31,9 +31,11 @@ export const AppLayer = Layer.merge(boot, Layer.provideTo(HttpServerLive, boot))
 //             | GetTodo | CreateTodo | HttpApp | HttpServer,
 //             ConfigError | ConnectionError | ListenError, Scope>
 
-// Attach a startup check to the ASSEMBLED graph: it runs AFTER the whole graph is built (the
-// pool connected), before the app serves anything — a real query verifying the schema is
-// reachable. Being fallible/async, its error unions into the graph's `E`.
+// Attach a startup check to the ASSEMBLED graph: it runs AFTER the whole graph is built — the
+// listener (an `acquireRelease` inside `AppLayer`) is already accepting connections by then — a
+// real query verifying the schema is reachable, gating the entry point's `use`: a failed check
+// means `use` is skipped and the scope closes (listener + Prisma torn down). Being fallible/async,
+// its error unions into the graph's `E`.
 export const AppStarted = Layer.onStart(
   AppLayer,
   (ctx: Context<Database>): AsyncResult<void, MigrationError> =>

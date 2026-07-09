@@ -128,8 +128,8 @@ into a single value-or-function overload:
 
 Plus three **injection sugars** over `factory` — they remove the hand-written
 `ctx => new X(ctx.get(A), ctx.get(B))` factory (the `asClass` / `Effect.Service` ergonomic),
-and demesne does the instantiation. Both stay infallible (`E = never`; a throwing constructor
-becomes a `Defect`, like `factory`):
+and demesne does the instantiation. All three stay infallible (`E = never`; a throw during
+construction becomes a `Defect`, like `factory`):
 
 - **`Layer.class(tag, [deps], Ctor)`** — constructs `Ctor` from a **tag list**. The list is
   type-checked against the constructor's parameters (wrong order, wrong type, or too **few**

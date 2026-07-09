@@ -291,3 +291,10 @@ type _constGreeter = Expect<Equal<typeof constGreeter, Layer<GreeterTag, never, 
 
 // @ts-expect-error - f must return the tag's service shape (a Greeter, not a number).
 Layer.inject(GreeterTag, { a: ServiceA }, () => 42);
+
+// A dep's service shape governs what f can do with it — an unknown member is rejected.
+Layer.inject(GreeterTag, { a: ServiceA }, ({ a }) => {
+  // @ts-expect-error - notAField does not exist on ServiceA's service shape.
+  void a.notAField;
+  return (name: string) => name;
+});

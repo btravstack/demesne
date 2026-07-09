@@ -402,9 +402,9 @@ The wiring core is complete: requirements and errors as static unions, single-pa
 hand-threaded assembly (`provideTo` / variadic `merge`), namespaced API, memoization, scoped
 resources, **type-level scope enforcement** (the compiler rejects a resource graph passed to
 `build`), **request / child scopes** (`Layer.forkScope`), **multi-bindings** (`Layer.member` /
-`Layer.collect`), **lifecycle hooks** (`Layer.onStart` / `Layer.onStop`), **constructor
-injection** (`Layer.class` / `Service` + `Layer.fromService`), and **graph introspection**
-(`Layer.describe` / `Layer.toDot`). (An earlier
+`Layer.collect`), **lifecycle hooks** (`Layer.onStart` / `Layer.onStop`), **constructor / record
+injection** (`Layer.class` / `Service` + `Layer.fromService` / `Layer.inject`), and **graph
+introspection** (`Layer.describe` / `Layer.toDot`). (An earlier
 `Layer.wire` / `Layer.override` — the only runtime-resolution parts — was removed as at odds
 with the compile-time thesis.) Further ideas live in [`CLAUDE.md`](./CLAUDE.md).
 
