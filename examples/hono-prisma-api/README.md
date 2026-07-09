@@ -11,15 +11,17 @@ src/
   application/ports.ts         # Logger + TodoRepository ports (tags; domain types only)
   application/plugins.ts       # AuditSinks plugin collection: member + collect
   application/get-todo.ts      # use case via `Service` — one fused declaration (tag+inject+layer)
-  application/{list,create}-*  # use cases via `Layer.class` — plain class + a deps list
+  application/{list,create}-*  # use cases via `Layer.inject` — function-shaped, built from a deps record
   config/env.ts                # zod schema → AppConfig (Layer.make → ConfigError)
   infra/prisma.ts              # PrismaClient as a resource (acquireRelease → Scope)
   infra/todo-repository.ts     # TodoRepository backed by Prisma, rows → domain Todo
   infra/logger.ts              # console Logger
-  http/routes.ts               # Hono routes: Result → HTTP (.match → 200/201/404/400/500)
+  http/request.ts              # per-request scope: RequestId + RequestLogger (forked per request)
+  http/routes.ts               # HttpApp: the Hono app itself, an injected service (Layer.inject)
+  http/server.ts               # HttpServer listener as a resource (acquireRelease → Scope)
   bootstrap.ts                 # assemble the app around a repository provider (shared)
-  app.ts                       # bootstrap(prismaRepo) (+ onStart startup check) — carries Scope
-  server.ts                    # Layer.scoped(...) — serve for the scope's lifetime
+  app.ts                       # bootstrap(prismaRepo) + the listener (+ onStart check) — carries Scope
+  server.ts                    # Layer.scoped(AppStarted, waitForShutdown) — serve for the scope's lifetime
   app.test.ts                  # HTTP + combinator tests via bootstrap(fake) — no database
 prisma/schema.prisma           # the Todo model
 prisma.config.ts               # Prisma 7 config (migrate connection URL)
@@ -37,25 +39,34 @@ prisma.config.ts               # Prisma 7 config (migrate connection URL)
   (`@prisma/adapter-pg`) takes the URL from the zod-validated config, not the schema.
 - **Ports keep Prisma out of the core.** The `TodoRepository` port speaks only domain types;
   the Prisma-backed adapter maps rows to `Todo` and turns a missing row into `TodoNotFound`.
-- **Constructor injection, two ways.** The use cases are classes built from ports, so demesne
-  does the `new` for you: `list`/`create` use `Layer.class(tag, [Logger, TodoRepository], Ctor)`
-  (the class stays plain, the deps list is checked against the constructor); `get-todo` uses
-  `Service` (one declaration fuses the tag and the injected `this.logger` / `this.todos`, with
-  `Layer.fromService(GetTodo)` bound to a `const` as its layer). Neither writes a hand-rolled
-  `ctx => new UseCase(...)` factory.
+- **Injection, two ways.** `list-todos.ts` / `create-todo.ts` are FUNCTION-shaped: the tag's
+  service IS the function type, and `Layer.inject(tag, deps, f)` builds it from a deps record —
+  call sites read it and call it directly (`ctx.get(CreateTodo)(input)`). `get-todo.ts` uses
+  `Service` instead: state or several methods is when a class earns its keep — one declaration
+  fuses the tag and the injected `this.logger` / `this.todos`, with `Layer.fromService(GetTodo)`
+  bound to a `const` as its layer. Neither writes a hand-rolled `ctx => new UseCase(...)` factory.
 - **One bootstrap for the app and the tests (the test seam).** `bootstrap.ts` assembles the
   app around a repository provider by hand (`provideTo` / `merge` — demesne has no auto-wiring);
   `app.ts` calls `bootstrap(prismaRepo)`, the tests call `bootstrap(fake)`, so both build the
   **same app** — only the storage differs, and the tests need no database. Parameterizing the
   graph like this is how you swap a real adapter for a fake. A startup check (`Layer.onStart`)
   runs a real query before serving.
-- **unthrown → Hono (the edge).** `http/routes.ts` resolves use cases from the demesne
-  `Context` and maps each `Result` with `.match<Response>`: `ok` → 200/201, a domain
-  `TodoNotFound` → 404, any other modeled error → 500, a `defect` (unmodeled throw) → 500.
-  zod validates the request body (400 on failure).
+- **The HTTP edge is IN the DI.** `http/routes.ts` builds `HttpApp` — the Hono app itself — with
+  `Layer.inject`, from the wired use cases, the audit collection and the Logger; a middleware
+  opens a `Layer.forkScope` off the app's own context on every request (fresh `RequestId`, a
+  request-tagged `RequestLogger` that stamps `[id]` on every line, an `x-request-id` response
+  header), and the fork closes when the request ends. Handlers map each `Result` with
+  `.match<Response>`: `ok` → 200/201, a domain `TodoNotFound` → 404, any other modeled error →
+  500, a `defect` (unmodeled throw) → 500. zod validates the request body (400 on failure).
+- **The listener is a resource too.** `http/server.ts`'s `HttpServerLive` is an
+  `acquireRelease` that starts the Node HTTP server on build and closes it on teardown, so the
+  graph's `Scope` covers both the listener and the Prisma pool — `server.ts`
+  (`Layer.scoped(AppStarted, waitForShutdown)`) closes them LIFO on shutdown: the listener stops
+  accepting, then Prisma disconnects.
 - **Plugins & scopes.** A plugin collection (`Layer.member` / `Layer.collect`) accumulates
-  audit sinks that the create route fans an event out to. The tests also show `Layer.forkScope`
-  (a per-request child scope on the built app) and `Layer.onStop` (teardown on scope close).
+  audit sinks that the create route fans an event out to. The tests also exercise
+  `Layer.forkScope` (the per-request child scope) and `Layer.onStop` (teardown on scope close)
+  directly.
 
 ## Prisma 7 notes
 
@@ -75,7 +86,7 @@ cp .env.example .env                     # edit DATABASE_URL
 # 2. create the table (Prisma reads the URL from prisma.config.ts)
 pnpm --filter @demesne-examples/hono-prisma-api exec prisma migrate dev --name init
 
-# 3. serve (Ctrl-C triggers a clean shutdown → Prisma disconnects via the scope)
+# 3. serve (Ctrl-C triggers a clean shutdown → listener then Prisma close via the scope, LIFO)
 pnpm --filter @demesne-examples/hono-prisma-api dev
 # GET /todos · GET /todos/:id · POST /todos {"title":"…"}
 ```
