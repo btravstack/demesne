@@ -34,5 +34,10 @@ export const HttpServerLive = Layer.acquireRelease(
       }),
       (cause) => new ListenError({ cause }),
     ),
-  ({ server }) => new Promise<void>((resolve) => server.close(() => resolve())),
+  ({ server }) =>
+    new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Sever keep-alive sockets to avoid delay until keepAliveTimeout
+      if ("closeAllConnections" in server) server.closeAllConnections();
+    }),
 );
