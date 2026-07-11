@@ -49,7 +49,12 @@ the handler finishes — success or failure.
 With **amqp-contract** (`@amqp-contract/worker`):
 
 ```ts
-import { composeMiddleware, defineMiddleware, TypedAmqpWorker } from "@amqp-contract/worker";
+import {
+  composeMiddleware,
+  defineMiddleware,
+  type EmptyContext,
+  TypedAmqpWorker,
+} from "@amqp-contract/worker";
 import { type Context, Layer } from "demesne";
 
 // What handlers see: the forked per-message context.
@@ -98,11 +103,18 @@ Three properties make this composition exact:
 chain operating on the `AsyncResult` inside the validation boundary:
 
 ```ts
-import { declareActivitiesHandler, defineActivityMiddleware } from "@temporal-contract/worker";
+import {
+  declareActivitiesHandler,
+  defineActivityMiddleware,
+  type EmptyContext,
+} from "@temporal-contract/worker/activity";
 import { type Context, Layer } from "demesne";
 
+// What activities see: the forked per-invocation context (ActivityScopeLive's provisions).
+type ActivityScope = { scope: Context<Logger | Txn> };
+
 const createWorker = (appCtx: Context<AppServices>) => {
-  const activityScope = defineActivityMiddleware<EmptyContext, MessageScope>((_invocation, next) =>
+  const activityScope = defineActivityMiddleware<EmptyContext, ActivityScope>((_invocation, next) =>
     Layer.forkScope(appCtx, ActivityScopeLive, (actCtx) => next({ context: { scope: actCtx } })),
   );
 
