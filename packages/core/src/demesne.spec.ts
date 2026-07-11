@@ -336,6 +336,43 @@ describe("Layer.describe + Layer.toDot: graph introspection", () => {
       ].join("\n"),
     );
   });
+
+  it("runs no factories or acquires — introspection reads recorded meta only", () => {
+    // The load-bearing safety property: describe/toDot are read-only diagnostics, so
+    // they are safe on acquireRelease graphs. A spy on every side-effecting slot must
+    // stay at zero — no factory body, no acquire, no release ever fires.
+    let sideEffects = 0;
+    class GraphSpyResource extends Tag("GraphSpyResource")<
+      GraphSpyResource,
+      { readonly c: number }
+    >() {}
+    class GraphSpyService extends Tag("GraphSpyService")<
+      GraphSpyService,
+      { readonly v: number }
+    >() {}
+
+    const Resource = Layer.acquireRelease(
+      GraphSpyResource,
+      (): Result<{ readonly c: number }, never> => {
+        sideEffects += 1;
+        return Ok({ c: 1 });
+      },
+      () => {
+        sideEffects += 1;
+      },
+    );
+    const Built = Layer.factory(GraphSpyService, (ctx: Context<GraphSpyResource>) => {
+      sideEffects += 1;
+      void ctx.get(GraphSpyResource);
+      return { v: 1 };
+    });
+    const root = Layer.provideTo(Built, Resource);
+
+    Layer.describe(root);
+    Layer.toDot(root);
+
+    expect(sideEffects).toBe(0);
+  });
 });
 
 describe("error union at the edge", () => {
@@ -979,6 +1016,25 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
 
     const out = await Layer.build(Layer.collect(Plugins, [A, Bad]));
     expect(out).toBeErrTagged("MbBoom");
+  });
+
+  it("builds a repeated member reference once but contributes its items per listing", async () => {
+    // A member reference is a singleton per build (memoized by reference), but its
+    // contribution is per listing: the SAME reference listed twice constructs once
+    // yet its items land in the collection twice.
+    let constructions = 0;
+    const Once = Layer.member(Plugins, () => {
+      constructions += 1;
+      return { name: "once", weight: 1 };
+    });
+
+    const ctx = (await Layer.build(Layer.collect(Plugins, [Once, Once]))).get();
+
+    expect(constructions).toBe(1);
+    expect(ctx.get(Plugins)).toEqual([
+      { name: "once", weight: 1 },
+      { name: "once", weight: 1 },
+    ]);
   });
 });
 

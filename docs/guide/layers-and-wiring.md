@@ -300,7 +300,7 @@ const result = await Layer.build(AppLayer);
 :::
 
 A build also **memoizes**: a layer shared across branches constructs once. For resources
-that need teardown, see [Resources & Scopes](./roadmap).
+that need teardown, see [Resources & Scopes](./resources-and-scopes).
 
 ### `Layer.acquireRelease` + `Layer.scoped` — resources
 
@@ -322,7 +322,7 @@ const result = await Layer.scoped(PoolLive, (ctx) => useThePool(ctx.get(Pool)));
 
 `acquireRelease` puts a phantom `Scope` in the layer's requirements, so `Layer.build`
 **rejects a resource graph at compile time** — you're forced to use `Layer.scoped`.
-Full details in [Resources & Scopes](./roadmap).
+Full details in [Resources & Scopes](./resources-and-scopes).
 
 ## Introspection: `Layer.describe` / `Layer.toDot`
 
@@ -347,8 +347,8 @@ console.log(Layer.toDot(AppLayer));
 ```
 
 ::: warning Exact vs. inferred edges
-Edges are **exact** for `value` / `class` / `Service` — their dependency keys are known at
-runtime. For `factory` / `make` / `acquireRelease` / `member`, the per-service `Needs` live only
+Edges are **exact** for `value` / `class` / `Service` / `inject` — their dependency keys are
+known at runtime. For `factory` / `make` / `acquireRelease` / `member`, the per-service `Needs` live only
 in the (erased) type, so their edges are **inferred from the `provideTo` composition** — what
 they were fed. Inferred edges (`edge.inferred === true`) render **dashed**; they're exact about
 the wiring but may over-approximate actual usage. A hand-built `{ build }` layer with no

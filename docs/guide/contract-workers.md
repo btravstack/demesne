@@ -12,7 +12,7 @@ demesne is the designed engine for that seam: `Layer.scoped` holds the **worker
 singletons**, `Layer.forkScope` opens the **per-message / per-activity scope**, and
 because both libraries already speak unthrown `AsyncResult`s, the two compose with
 **zero adapters**. (The mechanics of `scoped` / `forkScope` live in
-[Resources & Scopes](./roadmap); this page is the integration recipe.)
+[Resources & Scopes](./resources-and-scopes); this page is the integration recipe.)
 
 ## 1. Worker singletons: `Layer.scoped` around the worker's lifetime
 
