@@ -1,10 +1,11 @@
-// Infrastructure — the TodoRepository port backed by Prisma. Each method wraps a Prisma
-// query with `fromPromise` (so a driver rejection becomes a modeled `RepositoryError`) and
-// maps rows into the domain `Todo`. `findById` turns a missing row into `TodoNotFound`.
-// The factory is sync + infallible; it just assembles the repo from the connected client.
+// Infrastructure — the TodoRepository port backed by Prisma, through the `@unthrown/prisma`
+// bridge: each query is a `try*` method returning an `AsyncResult` whose
+// error channel is exactly the P-codes that operation can hit, so the repository maps
+// tagged errors into domain ones instead of qualifying raw rejections at every call site.
+// `findById` uses `tryFindUniqueOrThrow` and maps `RecordNotFound` (P2025) to the domain
+// `TodoNotFound`; everything else folds into `RepositoryError`.
 
 import { type Context, Layer } from "demesne";
-import { Err, fromPromise, Ok } from "unthrown";
 
 import { TodoRepository } from "../application/ports.js";
 import { RepositoryError, TodoNotFound } from "../domain/todo.js";
@@ -15,15 +16,18 @@ export const TodoRepoLive = Layer.factory(TodoRepository, (ctx: Context<Database
   const toRepositoryError = (cause: unknown): RepositoryError => new RepositoryError({ cause });
 
   return {
-    list: () =>
-      fromPromise(db.todo.findMany({ orderBy: { createdAt: "desc" } }), toRepositoryError),
+    list: () => db.todo.tryFindMany({ orderBy: { createdAt: "desc" } }).mapErr(toRepositoryError),
 
     findById: (id) =>
-      fromPromise(db.todo.findUnique({ where: { id } }), toRepositoryError).flatMap((row) =>
-        row ? Ok(row) : Err(new TodoNotFound({ id })),
-      ),
+      db.todo
+        .tryFindUniqueOrThrow({ where: { id } })
+        .mapErr((e) =>
+          e._tag === "RecordNotFound"
+            ? new TodoNotFound({ id })
+            : new RepositoryError({ cause: e }),
+        ),
 
     create: (input) =>
-      fromPromise(db.todo.create({ data: { title: input.title } }), toRepositoryError),
+      db.todo.tryCreate({ data: { title: input.title } }).mapErr(toRepositoryError),
   };
 });

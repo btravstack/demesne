@@ -1,7 +1,7 @@
 {
   "name": "@demesne-examples/hono-prisma-api",
   "private": true,
-  "description": "A Hono REST API wired with demesne: zod env, Prisma/Postgres, unthrown Results mapped to HTTP",
+  "description": "A Hono + oRPC API wired with demesne: zod env, Prisma/Postgres, unthrown Results with end-to-end typed errors",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -12,8 +12,12 @@
   },
   "dependencies": {
     "@hono/node-server": "catalog:",
+    "@orpc/contract": "catalog:",
+    "@orpc/server": "catalog:",
     "@prisma/adapter-pg": "catalog:",
     "@prisma/client": "catalog:",
+    "@unthrown/orpc": "catalog:",
+    "@unthrown/prisma": "catalog:",
     "demesne": "workspace:*",
     "hono": "catalog:",
     "unthrown": "catalog:",
@@ -21,6 +25,7 @@
   },
   "devDependencies": {
     "@demesne/tsconfig": "workspace:*",
+    "@orpc/client": "catalog:",
     "@types/node": "catalog:",
     "prisma": "catalog:",
     "tsx": "catalog:",
