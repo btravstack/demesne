@@ -23,8 +23,8 @@ catalog:
   "@prisma/adapter-pg": 7.8.0
   "@prisma/client": 7.8.0
   "@types/node": 24.13.2
-  "@unthrown/orpc": 0.0.0
-  "@unthrown/prisma": 0.0.0
+  "@unthrown/orpc": 0.1.0
+  "@unthrown/prisma": 0.1.0
   "@unthrown/vitest": 4.1.0
   "@vitest/coverage-v8": 4.1.8
   hono: 4.12.27
@@ -44,14 +44,6 @@ catalog:
   vitepress: 1.6.4
   vitest: 4.1.8
   zod: 4.4.3
-
-# `@unthrown/prisma@0.0.0` and `@unthrown/orpc@0.0.0` were published with their
-# `unthrown` dependency left as the un-rewritten `workspace:^` protocol, which only
-# resolves inside their own monorepo. Rewrite that edge to the real range until fixed
-# releases ship — then drop this.
-overrides:
-  "@unthrown/prisma>unthrown": ^4.1.0
-  "@unthrown/orpc>unthrown": ^4.1.0
 
 peerDependencyRules:
   ignoreMissing:
