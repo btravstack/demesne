@@ -43,11 +43,11 @@ catalogs:
       specifier: 24.13.2
       version: 24.13.2
     '@unthrown/orpc':
-      specifier: 0.0.0
-      version: 0.0.0
+      specifier: 0.1.0
+      version: 0.1.0
     '@unthrown/prisma':
-      specifier: 0.0.0
-      version: 0.0.0
+      specifier: 0.1.0
+      version: 0.1.0
     '@unthrown/vitest':
       specifier: 4.1.0
       version: 4.1.0
@@ -105,10 +105,6 @@ catalogs:
     zod:
       specifier: 4.4.3
       version: 4.4.3
-
-overrides:
-  '@unthrown/prisma>unthrown': ^4.1.0
-  '@unthrown/orpc>unthrown': ^4.1.0
 
 importers:
 
@@ -180,10 +176,10 @@ importers:
         version: 7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3)
       '@unthrown/orpc':
         specifier: 'catalog:'
-        version: 0.0.0(@orpc/client@2.0.0-beta.14)(@orpc/server@2.0.0-beta.14)
+        version: 0.1.0(@orpc/client@2.0.0-beta.14)(@orpc/server@2.0.0-beta.14)
       '@unthrown/prisma':
         specifier: 'catalog:'
-        version: 0.0.0(@prisma/client@7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3))
+        version: 0.1.0(@prisma/client@7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3))
       demesne:
         specifier: workspace:*
         version: link:../../packages/core
@@ -2108,8 +2104,8 @@ packages:
   '@ungap/structured-clone@1.3.2':
     resolution: {integrity: sha512-5jsZFwgR5rTdKwidH9Qmat75RKwqfpKlWWB1frDkljN127mwqBu8K0PYo7/hFpF03IEJpfVPpCQDY/eDx3iHvA==}
 
-  '@unthrown/orpc@0.0.0':
-    resolution: {integrity: sha512-1szd04ZMTI1yPYDDH91aZtPFVnND4NA4hWCU/1mDFJS4zR6RPECdrJvhxbiEPuVSRbsg4RTXZo6A5kLAMeStCg==}
+  '@unthrown/orpc@0.1.0':
+    resolution: {integrity: sha512-yG56xbfowZhFn6QiHrFnBWbj+Y3cjKIyQA9NBMK8bqEqFpH4QdHkqmb1PGpuy9ZJzKB1dCJlsv7/+Ck0qzY//g==}
     engines: {node: '>=20'}
     peerDependencies:
       '@orpc/client': ^2.0.0-beta
@@ -2118,8 +2114,8 @@ packages:
       '@orpc/server':
         optional: true
 
-  '@unthrown/prisma@0.0.0':
-    resolution: {integrity: sha512-f3r/C1Is4vVtNnb7B4dH5WsSVcDkL5gPADWwTB99WHjP0AoLHoqZyrsVhAZs5pXJ3JLebDW943kWq8WW8DRx5w==}
+  '@unthrown/prisma@0.1.0':
+    resolution: {integrity: sha512-45bhrZYkn18Vwa5UmMpzdcQH4iHERu3vWR6IAfUfo91jBfhSbkNNEIRM7ZNBPCK6M6oBgI9nDf/rkBUqwOzeVw==}
     engines: {node: '>=20.19'}
     peerDependencies:
       '@prisma/client': ^7
@@ -5504,14 +5500,14 @@ snapshots:
 
   '@ungap/structured-clone@1.3.2': {}
 
-  '@unthrown/orpc@0.0.0(@orpc/client@2.0.0-beta.14)(@orpc/server@2.0.0-beta.14)':
+  '@unthrown/orpc@0.1.0(@orpc/client@2.0.0-beta.14)(@orpc/server@2.0.0-beta.14)':
     dependencies:
       '@orpc/client': 2.0.0-beta.14
       unthrown: 4.1.0
     optionalDependencies:
       '@orpc/server': 2.0.0-beta.14
 
-  '@unthrown/prisma@0.0.0(@prisma/client@7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3))':
+  '@unthrown/prisma@0.1.0(@prisma/client@7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3))':
     dependencies:
       '@prisma/client': 7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3)
       unthrown: 4.1.0
