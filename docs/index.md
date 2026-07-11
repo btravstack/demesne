@@ -45,7 +45,9 @@ import { Err, Ok, type Result, TaggedError } from "unthrown";
 // A port: the class IS the tag; the service shape is inlined.
 class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
 
-class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
+class ConfigError extends TaggedError("@app/ConfigError", { name: "ConfigError" })<{
+  reason: string;
+}> {}
 
 // A layer — sync but fallible. The error type is inferred from the Err you return.
 const ConfigLive = Layer.make(AppConfig, () => {

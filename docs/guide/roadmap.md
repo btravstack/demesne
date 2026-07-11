@@ -33,7 +33,7 @@ import { Layer, Tag, type Context } from "demesne";
 import { fromPromise, type Result, TaggedError } from "unthrown";
 
 class Pool extends Tag("Pool")<Pool, { readonly query: (sql: string) => Promise<unknown[]> }>() {}
-class PoolError extends TaggedError("PoolError")<{ cause: unknown }> {}
+class PoolError extends TaggedError("@app/PoolError", { name: "PoolError" })<{ cause: unknown }> {}
 
 const PoolLive = Layer.acquireRelease(
   Pool,
@@ -91,7 +91,7 @@ import { Layer, Tag, type Context } from "demesne";
 import { fromPromise, TaggedError } from "unthrown";
 
 class Txn extends Tag("Txn")<Txn, { readonly exec: (sql: string) => Promise<void> }>() {}
-class TxnError extends TaggedError("TxnError")<{ cause: unknown }> {}
+class TxnError extends TaggedError("@app/TxnError", { name: "TxnError" })<{ cause: unknown }> {}
 
 // Per-request: opens a transaction against the shared Pool, commits/rolls back on release.
 const RequestLive = Layer.acquireRelease(
@@ -137,7 +137,9 @@ these to any layer.
 import { Layer, Tag, type Context } from "demesne";
 import { fromPromise, type Result, TaggedError } from "unthrown";
 
-class MigrationError extends TaggedError("MigrationError")<{ cause: unknown }> {}
+class MigrationError extends TaggedError("@app/MigrationError", { name: "MigrationError" })<{
+  cause: unknown;
+}> {}
 
 // run AFTER the whole graph is built, before `use`, in dependency order:
 const DbLive = Layer.onStart(PoolLive, (ctx: Context<Pool>) =>

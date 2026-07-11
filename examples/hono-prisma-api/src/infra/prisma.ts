@@ -20,7 +20,11 @@ const makeClient = (connectionString: string) =>
 
 export class Database extends Tag("Database")<Database, ReturnType<typeof makeClient>>() {}
 
-export class ConnectionError extends TaggedError("ConnectionError")<{ cause: unknown }> {}
+export class ConnectionError extends TaggedError("@app/ConnectionError", {
+  name: "ConnectionError",
+})<{
+  cause: unknown;
+}> {}
 
 // Needs `AppConfig` (for the URL); async + fallible (the connect may reject). `fromPromise`
 // qualifies the rejection into a modeled `ConnectionError`.

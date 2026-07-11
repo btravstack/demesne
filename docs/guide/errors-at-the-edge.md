@@ -13,8 +13,8 @@ const wiring = await Layer.build(AppLayer);
 //    ^? Result<Context<Logger | OrderRepository>, ConnectionError | ConfigError>
 
 if (wiring.isErr()) {
-  const e = wiring.unwrapErr(); // ConnectionError | ConfigError
-  console.error(e._tag === "ConfigError" ? `config: ${e.reason}` : `db: ${e.url}`);
+  const e = wiring.error; // ConnectionError | ConfigError (the isErr guard narrows)
+  console.error(e._tag === "@app/ConfigError" ? `config: ${e.reason}` : `db: ${e.url}`);
 }
 ```
 
@@ -25,7 +25,8 @@ error too:
 ```ts
 const message = wiring.match({
   ok: (ctx) => ctx.get(Logger).log("wired") ?? "ok",
-  err: (e) => (e._tag === "ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`),
+  err: (e) =>
+    e._tag === "@app/ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`,
   defect: (cause) => `panic: ${String(cause)}`,
 });
 ```
@@ -49,7 +50,7 @@ So once the graph is built, you handle a **second** unthrown result, one level d
 
 ```ts
 if (wiring.isOk()) {
-  const ctx = wiring.unwrap();
+  const ctx = wiring.value; // the isOk guard narrows
   const order = await ctx.get(OrderRepository).findById("order-1");
   console.log(
     order.match({

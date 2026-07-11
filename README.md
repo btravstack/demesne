@@ -107,7 +107,9 @@ import { TaggedError } from "unthrown";
 type Order = { readonly id: string; readonly total: number };
 
 // the order doesn't exist — a domain-level failure, modeled as a value
-class OrderNotFound extends TaggedError("OrderNotFound")<{ id: string }> {}
+class OrderNotFound extends TaggedError("@app/OrderNotFound", { name: "OrderNotFound" })<{
+  id: string;
+}> {}
 ```
 
 ### Ports
@@ -210,8 +212,12 @@ class Database extends Tag("Database")<
 >() {}
 
 // infrastructure errors — these surface as the wiring error union
-class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
-class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
+class ConfigError extends TaggedError("@app/ConfigError", { name: "ConfigError" })<{
+  reason: string;
+}> {}
+class ConnectionError extends TaggedError("@app/ConnectionError", { name: "ConnectionError" })<{
+  url: string;
+}> {}
 
 // console logger — ready, cannot fail
 const LoggerLive = Layer.value(Logger, { log: (m) => console.log(`[log] ${m}`) });
@@ -276,7 +282,7 @@ const wiring = await Layer.build(AppLayer);
 
 if (wiring.isOk()) {
   // Resolve the wired use case and run it — demesne already injected its ports.
-  const order = await wiring.unwrap().get(GetOrder).execute("order-1");
+  const order = await wiring.value.get(GetOrder).execute("order-1");
   console.log(
     order.match({
       ok: (o) => `order ${o.id}: ${o.total}`,
@@ -286,8 +292,10 @@ if (wiring.isOk()) {
   );
 } else {
   // every WIRING failure, handled once as a static union
-  const e = wiring.unwrapErr();
-  console.error(e._tag === "ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`);
+  const e = wiring.error;
+  console.error(
+    e._tag === "@app/ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`,
+  );
 }
 ```
 
@@ -346,7 +354,9 @@ class AppConfig extends Tag("AppConfig")<AppConfig, z.infer<typeof ConfigSchema>
 
 // A modeled, discriminated error for the E channel (nicer at the edge than a raw
 // issues array). Drop the `mapErr` if `SchemaIssues` is fine for you.
-class ConfigError extends TaggedError("ConfigError")<{ issues: SchemaIssues }> {}
+class ConfigError extends TaggedError("@app/ConfigError", { name: "ConfigError" })<{
+  issues: SchemaIssues;
+}> {}
 
 // Sync + fallible: validate the injected env against the schema.
 const AppConfigLive = Layer.make(AppConfig, (ctx: Context<Env>) =>

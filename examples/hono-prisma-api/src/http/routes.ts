@@ -57,7 +57,7 @@ const makeRouter = ({ list, get, create, audit }: RouterDeps) => ({
           return get
             .execute(input.id)
             .mapErr((error) =>
-              error._tag === "TodoNotFound" ? errors.NOT_FOUND() : errors.STORAGE_FAILED(),
+              error._tag === "@app/TodoNotFound" ? errors.NOT_FOUND() : errors.STORAGE_FAILED(),
             );
         }),
       ),
@@ -82,7 +82,9 @@ const makeRouter = ({ list, get, create, audit }: RouterDeps) => ({
 export type TodoRouter = ReturnType<typeof makeRouter>;
 
 // A handler rejection crossing the fork boundary, qualified into the fork's error union.
-class RequestFailed extends TaggedError("RequestFailed")<{ cause: unknown }> {}
+class RequestFailed extends TaggedError("@app/RequestFailed", { name: "RequestFailed" })<{
+  cause: unknown;
+}> {}
 
 export class HttpApp extends Tag("HttpApp")<HttpApp, Hono>() {}
 

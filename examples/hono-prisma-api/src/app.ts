@@ -13,7 +13,9 @@ import { TodoRepoLive } from "./infra/todo-repository.js";
 import { bootstrap } from "./bootstrap.js";
 
 // A startup-check failure is one more way construction can fail — it joins the error union.
-class MigrationError extends TaggedError("MigrationError")<{ cause: unknown }> {}
+class MigrationError extends TaggedError("@app/MigrationError", { name: "MigrationError" })<{
+  cause: unknown;
+}> {}
 
 // The Prisma-backed repository, composed by hand: config → database → repository. It provides
 // TodoRepository (plus Database and AppConfig, which the assembled graph also exposes — the

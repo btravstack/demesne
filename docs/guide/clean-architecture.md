@@ -23,7 +23,9 @@ import { TaggedError } from "unthrown";
 
 export type Order = { readonly id: string; readonly total: number };
 
-export class OrderNotFound extends TaggedError("OrderNotFound")<{ id: string }> {}
+export class OrderNotFound extends TaggedError("@app/OrderNotFound", { name: "OrderNotFound" })<{
+  id: string;
+}> {}
 ```
 
 ## Ports
@@ -119,8 +121,12 @@ class Database extends Tag("Database")<
   }
 >() {}
 
-class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
-class ConnectionError extends TaggedError("ConnectionError")<{ url: string }> {}
+class ConfigError extends TaggedError("@app/ConfigError", { name: "ConfigError" })<{
+  reason: string;
+}> {}
+class ConnectionError extends TaggedError("@app/ConnectionError", { name: "ConnectionError" })<{
+  url: string;
+}> {}
 
 const LoggerLive = Layer.value(Logger, { log: (m) => console.log(`[log] ${m}`) });
 
@@ -178,7 +184,7 @@ const wiring = await Layer.build(AppLayer);
 
 if (wiring.isOk()) {
   // Resolve the wired use case and run it — demesne already injected its ports.
-  const order = await wiring.unwrap().get(GetOrder).execute("order-1");
+  const order = await wiring.value.get(GetOrder).execute("order-1");
   console.log(
     order.match({
       ok: (o) => `order ${o.id}: ${o.total}`,
@@ -187,8 +193,10 @@ if (wiring.isOk()) {
     }),
   );
 } else {
-  const e = wiring.unwrapErr();
-  console.error(e._tag === "ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`);
+  const e = wiring.error;
+  console.error(
+    e._tag === "@app/ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`,
+  );
 }
 ```
 

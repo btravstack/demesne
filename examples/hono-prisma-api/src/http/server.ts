@@ -16,7 +16,9 @@ export class HttpServer extends Tag("HttpServer")<
   { readonly port: number; readonly server: ServerType }
 >() {}
 
-export class ListenError extends TaggedError("ListenError")<{ cause: unknown }> {}
+export class ListenError extends TaggedError("@app/ListenError", { name: "ListenError" })<{
+  cause: unknown;
+}> {}
 
 export const HttpServerLive = Layer.acquireRelease(
   HttpServer,
