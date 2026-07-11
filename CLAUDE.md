@@ -346,7 +346,7 @@ Deliberate design choices, documented so they aren't rediscovered as bugs:
   Resource lifetimes stay lexically bounded (bracket-style) — deliberate, not Effect's
   freestanding `Scope.make`.
 - **`unthrown` is a lockstep peer.** demesne re-uses unthrown's `Result` / `AsyncResult` and
-  never re-implements them; the `peerDependencies` range (`^3`) tracks unthrown's major, so a
+  never re-implements them; the `peerDependencies` range (`^4.1`) tracks unthrown's major, so a
   breaking unthrown release requires a matching demesne major.
 
 ## Roadmap — ideas from the wider DI ecosystem

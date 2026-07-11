@@ -239,7 +239,7 @@ const AppLayer = bootstrap(RepoWired);
 
 // test — an in-memory fake that provides the port and needs nothing:
 const TestApp = bootstrap(Layer.value(OrderRepository, fakeRepo));
-const ctx = (await Layer.build(TestApp)).unwrap();
+const ctx = (await Layer.build(TestApp)).get(); // E is never here — get() compiles
 ctx.get(OrderRepository); // the fake — and so does every use case that consumed it
 ```
 

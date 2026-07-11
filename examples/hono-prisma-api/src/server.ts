@@ -31,11 +31,11 @@ outcome.match({
   ok: () => console.log("bye"),
   err: (error) =>
     console.error(
-      error._tag === "ConfigError"
+      error._tag === "@app/ConfigError"
         ? `config invalid: ${error.issues}`
-        : error._tag === "MigrationError"
+        : error._tag === "@app/MigrationError"
           ? `startup check failed: ${String(error.cause)}`
-          : error._tag === "ListenError"
+          : error._tag === "@app/ListenError"
             ? `could not listen: ${String(error.cause)}`
             : `database unreachable: ${String(error.cause)}`,
     ),

@@ -17,7 +17,9 @@ export type Env = z.infer<typeof EnvSchema>;
 
 export class AppConfig extends Tag("AppConfig")<AppConfig, Env>() {}
 
-export class ConfigError extends TaggedError("ConfigError")<{ issues: string }> {}
+export class ConfigError extends TaggedError("@app/ConfigError", { name: "ConfigError" })<{
+  issues: string;
+}> {}
 
 // Sync but fallible: `Layer.make` lifts the `Result` `safeParse` gives us. The env object
 // is passed whole to zod, so no property is read off the `process.env` index signature.

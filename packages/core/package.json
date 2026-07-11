@@ -63,6 +63,7 @@
     "@demesne/tsconfig": "workspace:*",
     "@demesne/typedoc": "workspace:*",
     "@types/node": "catalog:",
+    "@unthrown/vitest": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "publint": "catalog:",
     "tsdown": "catalog:",
@@ -73,7 +74,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "unthrown": "^3.0.0"
+    "unthrown": "^4.1.0"
   },
   "engines": {
     "node": ">=22.19"

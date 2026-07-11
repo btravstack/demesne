@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+// Registers the Result/AsyncResult matchers (toBeOk / toBeOkWith / toBeErr /
+// toBeErrTagged / toBeErrWith / toBeDefect) — the org-wide assertion DNA.
+import "@unthrown/vitest";
+
 import { Context, Layer, Service, Tag } from "./index.js";
 import {
   type AsyncResult,
@@ -97,13 +101,13 @@ describe("happy path: a value + factory + make graph builds to Ok", () => {
 
     const result = await Layer.build(AppLayer);
 
-    expect(result.isOk()).toBe(true);
-    const ctx = result.unwrap();
+    expect(result).toBeOk();
+    const ctx = result.getOrThrow();
     ctx.get(LoggerService).log("app wired");
     expect(logs).toEqual(["app wired"]);
     // A service operation is itself an unthrown AsyncResult — await and inspect it.
     const found = await ctx.get(OrderRepository).findById("order-1");
-    expect(found.unwrapErr()).toBeInstanceOf(OrderNotFound);
+    expect(found).toBeErrTagged("OrderNotFound");
     // Note: `ctx.get(AppConfig)` would be a COMPILE error here — AppConfig is
     // consumed by `provideTo` and is not in AppLayer's Provides union.
   });
@@ -140,10 +144,10 @@ describe("Layer.class: constructor injection without a hand-written factory", ()
 
     const ctx = (
       await Layer.build(Layer.provideTo(GetOrderLive, Layer.merge(LoggerLive, RepoLive)))
-    ).unwrap();
+    ).get();
     const found = await ctx.get(GetOrder).run("o-1");
 
-    expect(found.unwrap()).toEqual(order);
+    expect(found).toBeOkWith(order);
     expect(logs).toEqual(["get o-1"]);
   });
 
@@ -159,7 +163,7 @@ describe("Layer.class: constructor injection without a hand-written factory", ()
 
     const result = await Layer.build(Layer.provideTo(BoomLive, LoggerLive));
 
-    expect(result.isDefect()).toBe(true);
+    expect(result).toBeDefect();
   });
 });
 
@@ -188,10 +192,10 @@ describe("Service: tag + injection + layer in one declaration", () => {
     const GetOrderSvcLive = Layer.fromService(GetOrderSvc);
     const ctx = (
       await Layer.build(Layer.provideTo(GetOrderSvcLive, Layer.merge(LoggerLive, RepoLive)))
-    ).unwrap();
+    ).get();
     const found = await ctx.get(GetOrderSvc).run("s-1");
 
-    expect(found.unwrap()).toEqual(order);
+    expect(found).toBeOkWith(order);
     expect(logs).toEqual(["svc s-1"]);
   });
 
@@ -349,7 +353,7 @@ describe("error union at the edge", () => {
 
     const result = await Layer.build(DatabaseWired);
 
-    expect(result.isErr()).toBe(true);
+    expect(result).toBeErr();
 
     const message = result.match({
       ok: () => "ok",
@@ -359,9 +363,7 @@ describe("error union at the edge", () => {
     expect(message).toBe("config:DB_URL must be a postgres:// url");
 
     // the err payload is the expected TaggedError, asserted as one shape.
-    expect(result.unwrapErr()).toEqual(
-      expect.objectContaining({ _tag: "ConfigError", reason: "DB_URL must be a postgres:// url" }),
-    );
+    expect(result).toBeErrTagged("ConfigError", { reason: "DB_URL must be a postgres:// url" });
   });
 });
 
@@ -388,7 +390,7 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.merge(Slow, Fast));
 
-    expect(result.isOk()).toBe(true);
+    expect(result).toBeOk();
     // The fast layer starts before the slow one ends → genuine concurrency,
     // and finishes first → interleave, not sequential execution.
     expect(order).toEqual(["slow:start", "fast:start", "fast:end", "slow:end"]);
@@ -411,8 +413,8 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.merge(A, B, C));
 
-    expect(result.isOk()).toBe(true);
-    const ctx = result.unwrap();
+    expect(result).toBeOk();
+    const ctx = result.get();
     // Every layer's service is present in the merged Context.
     ctx.get(LoggerService).log("hi");
     expect(ctx.get(AppConfig).dbUrl).toBe("postgres://localhost/app");
@@ -430,7 +432,7 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.merge(Good, Bad));
 
-    expect(result.unwrapErr()).toBeInstanceOf(ConfigError);
+    expect(result).toBeErrTagged("ConfigError");
   });
 
   it("with two failing layers, the FIRST LISTED error wins (fold order, not timing)", async () => {
@@ -449,9 +451,7 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.merge(SlowFirst, FastSecond));
 
-    const err = result.unwrapErr();
-    expect(err).toBeInstanceOf(ConfigError);
-    expect((err as ConfigError).reason).toBe("first");
+    expect(result).toBeErrTagged("ConfigError", { reason: "first" });
   });
 
   it("a Defect dominates a sibling Err in a merge", async () => {
@@ -469,7 +469,7 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.merge(Bad, Boom));
 
-    expect(result.isDefect()).toBe(true);
+    expect(result).toBeDefect();
   });
 
   it("a thrown value inside construction becomes a Defect", async () => {
@@ -480,7 +480,7 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.merge(Good, Boom));
 
-    expect(result.isDefect()).toBe(true);
+    expect(result).toBeDefect();
   });
 
   it("a throw in a `factory` body becomes a Defect (not an escaped exception)", async () => {
@@ -491,7 +491,7 @@ describe("parallel merge", () => {
     // Must RESOLVE to a Defect — `Layer.build` must not reject/throw.
     const result = await Layer.build(Boom);
 
-    expect(result.isDefect()).toBe(true);
+    expect(result).toBeDefect();
   });
 
   it("a throw in a `member` body becomes a Defect", async () => {
@@ -502,13 +502,13 @@ describe("parallel merge", () => {
 
     const result = await Layer.build(Layer.collect(Plugins, [Boom]));
 
-    expect(result.isDefect()).toBe(true);
+    expect(result).toBeDefect();
   });
 });
 
 describe("internals: defensive runtime guards", () => {
   it("get throws when a service is absent from the underlying map", async () => {
-    const ctx = (await Layer.build(Layer.value(LoggerService, { log: () => {} }))).unwrap();
+    const ctx = (await Layer.build(Layer.value(LoggerService, { log: () => {} }))).get();
     // Reading a tag NOT in R is a COMPILE error; widen through `unknown` to
     // force the runtime guard (the type system normally makes this unreachable).
     const widened = ctx as unknown as Context<AppConfig>;
@@ -516,7 +516,7 @@ describe("internals: defensive runtime guards", () => {
   });
 
   it("the phantom _R variance marker is a no-op", async () => {
-    const ctx = (await Layer.build(Layer.value(LoggerService, { log: () => {} }))).unwrap();
+    const ctx = (await Layer.build(Layer.value(LoggerService, { log: () => {} }))).get();
     const phantom = (ctx as unknown as { _R: (r: unknown) => void })._R;
     expect(phantom(undefined)).toBeUndefined();
   });
@@ -595,7 +595,7 @@ describe("memoization: a shared layer constructs once per build", () => {
 
     const result = await Layer.build(App);
 
-    expect(result.isOk()).toBe(true);
+    expect(result).toBeOk();
     expect(constructions).toBe(1);
   });
 
@@ -649,7 +649,7 @@ describe("scopes: acquireRelease + scoped", () => {
       return Ok(ctx.get(PoolB).id);
     });
 
-    expect(out.unwrap()).toBe(2);
+    expect(out).toBeOkWith(2);
     expect(events).toEqual([
       "acquire:A",
       "acquire:B(sees 1)",
@@ -673,7 +673,7 @@ describe("scopes: acquireRelease + scoped", () => {
 
     const out = await Layer.scoped(A, (): Result<number, Boom> => Err(new Boom({ why: "nope" })));
 
-    expect(out.unwrapErr()).toBeInstanceOf(Boom);
+    expect(out).toBeErrTagged("Boom");
     expect(released).toEqual(["A"]); // released despite the failure
   });
 
@@ -703,7 +703,7 @@ describe("scopes: acquireRelease + scoped", () => {
       (): Result<string, never> => Ok("unreachable"),
     );
 
-    expect(out.unwrapErr()).toBeInstanceOf(BuildBoom);
+    expect(out).toBeErrTagged("BuildBoom");
     // `use` never ran, yet the resource acquired before the failure was released.
     expect(events).toEqual(["acquire:A", "release:A"]);
   });
@@ -713,7 +713,7 @@ describe("scopes: acquireRelease + scoped", () => {
     const out = await Layer.scoped(A, (ctx) =>
       fromSafePromise(Promise.resolve(`pool ${ctx.get(PoolA).id}`)),
     );
-    expect(out.unwrap()).toBe("pool 7");
+    expect(out).toBeOkWith("pool 7");
   });
 
   it("teardown is best-effort: a throwing release does not abort the rest", async () => {
@@ -735,14 +735,14 @@ describe("scopes: acquireRelease + scoped", () => {
     // A is acquired first, so it is released LAST — after B's release throws.
     const out = await Layer.scoped(Layer.provideTo(B, A), (): Result<string, never> => Ok("done"));
 
-    expect(out.unwrap()).toBe("done"); // the throwing release is swallowed
+    expect(out).toBeOkWith("done"); // the throwing release is swallowed
     expect(released).toEqual(["A"]); // A still released after B's release threw
   });
 });
 
 describe("Layer.forkScope: request / child scopes", () => {
   it("shares parent services and adds request-scoped ones", async () => {
-    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).get();
 
     class ReqId extends Tag("ReqId")<ReqId, { readonly id: string }>() {}
     const RequestLayer = Layer.factory(ReqId, (ctx: Context<AppConfig>) => ({
@@ -755,12 +755,12 @@ describe("Layer.forkScope: request / child scopes", () => {
       (ctx): Result<string, never> => Ok(`${ctx.get(AppConfig).dbUrl}/${ctx.get(ReqId).id}`),
     );
 
-    expect(out.unwrap()).toBe("u/req-u");
+    expect(out).toBeOkWith("u/req-u");
   });
 
   it("releases request-scoped resources after use, leaving the parent alive", async () => {
     const events: string[] = [];
-    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).get();
 
     class Txn extends Tag("Txn")<Txn, { readonly n: number }>() {}
     const TxnLayer = Layer.acquireRelease(
@@ -779,7 +779,7 @@ describe("Layer.forkScope: request / child scopes", () => {
       return Ok(ctx.get(Txn).n);
     });
 
-    expect(out.unwrap()).toBe(1);
+    expect(out).toBeOkWith(1);
     expect(events).toEqual(["open(u)", "use", "close"]);
     // the parent (its singletons) is untouched — still usable after the fork closed
     expect(appCtx.get(AppConfig).dbUrl).toBe("u");
@@ -787,7 +787,7 @@ describe("Layer.forkScope: request / child scopes", () => {
 
   it("builds fresh request-scoped services on each fork", async () => {
     let count = 0;
-    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).get();
 
     class Seq extends Tag("Seq")<Seq, { readonly n: number }>() {}
     const RequestLayer = Layer.make(Seq, (): Result<{ readonly n: number }, never> => {
@@ -806,14 +806,14 @@ describe("Layer.forkScope: request / child scopes", () => {
       (ctx): Result<number, never> => Ok(ctx.get(Seq).n),
     );
 
-    expect(a.unwrap()).toBe(1);
-    expect(b.unwrap()).toBe(2);
+    expect(a).toBeOkWith(1);
+    expect(b).toBeOkWith(2);
     expect(count).toBe(2);
   });
 
   it("releases multiple request resources in LIFO order", async () => {
     const events: string[] = [];
-    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).get();
 
     class ReqA extends Tag("ForkReqA")<ReqA, { readonly n: number }>() {}
     class ReqB extends Tag("ForkReqB")<ReqB, { readonly n: number }>() {}
@@ -848,13 +848,13 @@ describe("Layer.forkScope: request / child scopes", () => {
       },
     );
 
-    expect(out.unwrap()).toBe(2);
+    expect(out).toBeOkWith(2);
     expect(events).toEqual(["acquire:A", "acquire:B", "use", "release:B", "release:A"]);
   });
 
   it("releases request resources even when use fails", async () => {
     const released: string[] = [];
-    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).unwrap();
+    const appCtx = (await Layer.build(Layer.value(AppConfig, { dbUrl: "u" }))).get();
 
     class Txn extends Tag("Txn2")<Txn, { readonly n: number }>() {}
     class ForkBoom extends TaggedError("ForkBoom")<{ why: string }> {}
@@ -872,7 +872,7 @@ describe("Layer.forkScope: request / child scopes", () => {
       (): Result<number, ForkBoom> => Err(new ForkBoom({ why: "nope" })),
     );
 
-    expect(out.unwrapErr()).toBeInstanceOf(ForkBoom);
+    expect(out).toBeErrTagged("ForkBoom");
     expect(released).toEqual(["txn"]);
   });
 });
@@ -890,13 +890,13 @@ describe("Layer.fromService: a fresh layer per call, singleton via a shared cons
 
     // Two distinct references construct twice (the memo is keyed by reference)...
     const twice = await Layer.build(Layer.merge(l1, l2));
-    expect(twice.isOk()).toBe(true);
+    expect(twice).toBeOk();
     expect(stamps).toBe(2);
 
     // ...while one reference reused across branches constructs once.
     stamps = 0;
     const once = await Layer.build(Layer.merge(l1, l1));
-    expect(once.isOk()).toBe(true);
+    expect(once).toBeOk();
     expect(stamps).toBe(1);
   });
 });
@@ -910,7 +910,7 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     const B = Layer.member(Plugins, () => ({ name: "b", weight: 2 }));
     const C = Layer.member(Plugins, () => ({ name: "c", weight: 3 }));
 
-    const ctx = (await Layer.build(Layer.collect(Plugins, [A, B, C]))).unwrap();
+    const ctx = (await Layer.build(Layer.collect(Plugins, [A, B, C]))).get();
     const plugins = ctx.get(Plugins);
 
     expect(plugins).toEqual([
@@ -933,7 +933,7 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
       Layer.collect(Plugins, [Auth, Metrics]),
       Layer.value(Config, { env: "prod" }),
     );
-    const ctx = (await Layer.build(App)).unwrap();
+    const ctx = (await Layer.build(App)).get();
 
     expect(ctx.get(Plugins).map((p) => p.name)).toEqual(["auth-prod", "metrics"]);
   });
@@ -950,12 +950,12 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
         ]),
     );
 
-    const ctx = (await Layer.build(Layer.collect(Plugins, [A, Pair]))).unwrap();
+    const ctx = (await Layer.build(Layer.collect(Plugins, [A, Pair]))).get();
     expect(ctx.get(Plugins).map((p) => p.name)).toEqual(["a", "b", "c"]);
   });
 
   it("yields an empty collection for no members", async () => {
-    const ctx = (await Layer.build(Layer.collect(Plugins, []))).unwrap();
+    const ctx = (await Layer.build(Layer.collect(Plugins, []))).get();
     expect(ctx.get(Plugins)).toEqual([]);
   });
 
@@ -965,7 +965,7 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     // its output contributes nothing, exercising the defensive `arr === undefined` skip.
     const notAMember = Layer.value(Other, { x: 1 }) as unknown as Layer<Plugins, never, never>;
 
-    const ctx = (await Layer.build(Layer.collect(Plugins, [notAMember]))).unwrap();
+    const ctx = (await Layer.build(Layer.collect(Plugins, [notAMember]))).get();
     expect(ctx.get(Plugins)).toEqual([]);
   });
 
@@ -978,7 +978,7 @@ describe("Layer.member + Layer.collect: multi-bindings / plugin collections", ()
     );
 
     const out = await Layer.build(Layer.collect(Plugins, [A, Bad]));
-    expect(out.unwrapErr()).toBeInstanceOf(MbBoom);
+    expect(out).toBeErrTagged("MbBoom");
   });
 });
 
@@ -1012,7 +1012,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       },
     );
 
-    expect(out.unwrap()).toBe("db(cfg)");
+    expect(out).toBeOkWith("db(cfg)");
     expect(log).toEqual(["start:config", "start:migrate db(cfg)", "use"]);
   });
 
@@ -1026,7 +1026,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       },
     );
 
-    const ctx = (await Layer.build(ConfigLive)).unwrap();
+    const ctx = (await Layer.build(ConfigLive)).get();
     expect(ctx.get(Config).url).toBe("cfg");
     expect(log).toEqual(["warmup"]);
   });
@@ -1040,7 +1040,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
 
     const out = await Layer.build(DbLive);
     // a failed start hook surfaces as the graph's Err (build has no `use` to reach).
-    expect(out.unwrapErr()).toBeInstanceOf(MigrationError);
+    expect(out).toBeErrTagged("MigrationError");
   });
 
   it("closes the scope even when a start hook fails (teardown still runs)", async () => {
@@ -1064,7 +1064,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       return Ok("x");
     });
 
-    expect(out.isErr()).toBe(true);
+    expect(out).toBeErr();
     expect(log).toEqual(["start:fail", "stop:db"]); // use skipped, teardown ran
   });
 
@@ -1085,7 +1085,7 @@ describe("Layer.onStart + Layer.onStop: lifecycle hooks", () => {
       return Ok(ctx.get(Db).url);
     });
 
-    expect(out.unwrap()).toBe("a");
+    expect(out).toBeOkWith("a");
     // Config acquired before Db → teardown is LIFO: db first, then config.
     expect(log).toEqual(["use", "stop:db", "stop:config"]);
   });
@@ -1113,7 +1113,7 @@ describe("Layer.inject: record-injection for function-shaped services", () => {
       ),
     );
 
-    const ctx = (await Layer.build(wired)).unwrap();
+    const ctx = (await Layer.build(wired)).get();
 
     expect(ctx.get(Greet)("ada")).toBe("ada@postgres://localhost/app");
     expect(logs).toEqual(["greeting ada"]);
@@ -1122,7 +1122,7 @@ describe("Layer.inject: record-injection for function-shaped services", () => {
   it("an empty record needs nothing", async () => {
     const ConstGreet = Layer.inject(Greet, {}, () => (name) => `hi ${name}`);
 
-    const ctx = (await Layer.build(ConstGreet)).unwrap();
+    const ctx = (await Layer.build(ConstGreet)).get();
 
     expect(ctx.get(Greet)("bob")).toBe("hi bob");
   });
@@ -1134,7 +1134,7 @@ describe("Layer.inject: record-injection for function-shaped services", () => {
 
     const result = await Layer.build(Boom);
 
-    expect(result.isDefect()).toBe(true);
+    expect(result).toBeDefect();
   });
 
   it("the ctx argument is a legal forkScope parent", async () => {
@@ -1154,10 +1154,10 @@ describe("Layer.inject: record-injection for function-shaped services", () => {
     );
 
     const wired = Layer.provideTo(ForkerLive, Layer.value(LoggerService, { log: () => {} }));
-    const forker = (await Layer.build(wired)).unwrap().get(Forker);
+    const forker = (await Layer.build(wired)).get().get(Forker);
 
-    expect((await forker()).unwrap()).toBe(1);
-    expect((await forker()).unwrap()).toBe(2); // fresh instance per fork
+    await expect(forker()).toBeOkWith(1);
+    await expect(forker()).toBeOkWith(2); // fresh instance per fork
   });
 
   it("records exact needs for introspection (kind inject, solid edges)", () => {

@@ -10,7 +10,7 @@ pnpm add demesne unthrown
 ```
 
 ::: tip Requirements
-demesne requires `unthrown` `^3.0.0` and a TypeScript strict-mode setup. It ships dual
+demesne requires `unthrown` `^4.1.0` and a TypeScript strict-mode setup. It ships dual
 CJS/ESM with full type declarations.
 :::
 
@@ -27,7 +27,9 @@ import { Err, Ok, type Result, TaggedError } from "unthrown";
 class AppConfig extends Tag("AppConfig")<AppConfig, { readonly dbUrl: string }>() {}
 
 // 2. A modeled construction error.
-class ConfigError extends TaggedError("ConfigError")<{ reason: string }> {}
+class ConfigError extends TaggedError("@app/ConfigError", { name: "ConfigError" })<{
+  reason: string;
+}> {}
 
 // 3. A layer — sync but fallible. The service shape comes from the tag and the
 //    error type is inferred from the Err you return, so neither is annotated.
@@ -92,7 +94,9 @@ const DatabaseLive = Layer.class(Database, [AppConfig], PgDatabase);
 const DatabaseWired = Layer.provideTo(DatabaseLive, ConfigLive);
 //    ^? Layer<Database, ConfigError, never>
 
-const ctx = (await Layer.build(DatabaseWired)).unwrap();
+// getOrThrow throws the modeled ConfigError as-is — a real app matches on the union
+// instead (see [Errors at the Edge](./errors-at-the-edge)).
+const ctx = (await Layer.build(DatabaseWired)).getOrThrow();
 ctx.get(Database).query("select 1");
 ```
 

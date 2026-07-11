@@ -9,6 +9,9 @@
 
 import { describe, expect, it } from "vitest";
 
+// Registers the Result/AsyncResult matchers — the org-wide assertion DNA.
+import "@unthrown/vitest";
+
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
@@ -59,7 +62,7 @@ const makeFakeRepo = (): ServiceOf<TodoRepository> => {
 const fakeApp = () => bootstrap(Layer.value(TodoRepository, makeFakeRepo()));
 
 // The app is a SERVICE now: bootstrap wires HttpAppLive, so tests read it from the context.
-const buildTestApp = async () => (await Layer.build(fakeApp())).unwrap().get(HttpApp);
+const buildTestApp = async () => (await Layer.build(fakeApp())).get().get(HttpApp);
 
 // Every procedure returns an `AsyncResult`: the errors a procedure declares land TYPED in
 // the error channel (an `ORPCError` union discriminated by `code`); anything undeclared —
@@ -78,15 +81,13 @@ describe("todos api (typed oRPC client over the app)", () => {
   it("todos.list returns the collection", async () => {
     const rc = clientFor(await buildTestApp());
 
-    expect((await rc.todos.list()).unwrap()).toEqual([
-      expect.objectContaining({ title: "buy milk" }),
-    ]);
+    await expect(rc.todos.list()).toBeOkWith([expect.objectContaining({ title: "buy milk" })]);
   });
 
   it("todos.get returns the todo", async () => {
     const rc = clientFor(await buildTestApp());
 
-    expect((await rc.todos.get({ id: "seed-1" })).unwrap()).toEqual(
+    await expect(rc.todos.get({ id: "seed-1" })).toBeOkWith(
       expect.objectContaining({ title: "buy milk" }),
     );
   });
@@ -94,7 +95,7 @@ describe("todos api (typed oRPC client over the app)", () => {
   it("todos.get surfaces a missing id as a TYPED NOT_FOUND Err", async () => {
     const rc = clientFor(await buildTestApp());
 
-    expect((await rc.todos.get({ id: "nope" })).unwrapErr()).toEqual(
+    await expect(rc.todos.get({ id: "nope" })).toBeErrWith(
       expect.objectContaining({ code: "NOT_FOUND", message: "todo not found", inferable: true }),
     );
   });
@@ -102,7 +103,7 @@ describe("todos api (typed oRPC client over the app)", () => {
   it("todos.create creates a todo (and fans the event out to the audit sinks)", async () => {
     const rc = clientFor(await buildTestApp());
 
-    expect((await rc.todos.create({ title: "walk the dog" })).unwrap()).toEqual(
+    await expect(rc.todos.create({ title: "walk the dog" })).toBeOkWith(
       expect.objectContaining({ title: "walk the dog", completed: false }),
     );
   });
@@ -111,7 +112,7 @@ describe("todos api (typed oRPC client over the app)", () => {
     const rc = clientFor(await buildTestApp());
     await rc.todos.create({ title: "walk the dog" });
 
-    expect((await rc.todos.list()).unwrap()).toEqual(
+    await expect(rc.todos.list()).toBeOkWith(
       expect.arrayContaining([expect.objectContaining({ title: "walk the dog" })]),
     );
   });
@@ -139,7 +140,7 @@ describe("todos api (typed oRPC client over the app)", () => {
 
 describe("combinators on the same app", () => {
   it("collects both audit sinks (member + collect)", async () => {
-    const ctx = (await Layer.build(fakeApp())).unwrap();
+    const ctx = (await Layer.build(fakeApp())).get();
 
     expect(ctx.get(AuditSinks).map((sink) => sink.name)).toEqual(["console", "in-memory"]);
   });
@@ -148,7 +149,7 @@ describe("combinators on the same app", () => {
     const lines: string[] = [];
     const parent = (
       await Layer.build(Layer.value(Logger, { info: (msg) => lines.push(msg) }))
-    ).unwrap();
+    ).get();
 
     const idOf = async (): Promise<string> =>
       (
@@ -156,7 +157,7 @@ describe("combinators on the same app", () => {
           ctx.get(RequestLogger).info("hello");
           return Ok(ctx.get(RequestId).id);
         })
-      ).unwrap();
+      ).get();
 
     const first = await idOf();
     const second = await idOf();
@@ -176,7 +177,7 @@ describe("combinators on the same app", () => {
       (ctx: Context<AuditSinks>): Result<number, never> => Ok(ctx.get(AuditSinks).length),
     );
 
-    expect(out.unwrap()).toBe(2);
+    expect(out).toBeOkWith(2);
     expect(events).toEqual(["closed"]);
   });
 
@@ -203,7 +204,7 @@ describe("combinators on the same app", () => {
       return rc.todos.list().map((todos) => todos.length);
     });
 
-    expect(out.unwrap()).toBe(1);
+    expect(out).toBeOkWith(1);
     // the scope has closed → the listener is released and the port refuses connections
     await expect(fetch(`${url}/rpc/todos/list`, { method: "POST" })).rejects.toThrow();
   });

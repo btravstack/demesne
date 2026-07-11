@@ -48,6 +48,9 @@ catalogs:
     '@unthrown/prisma':
       specifier: 0.0.0
       version: 0.0.0
+    '@unthrown/vitest':
+      specifier: 4.1.0
+      version: 4.1.0
     '@vitest/coverage-v8':
       specifier: 4.1.8
       version: 4.1.8
@@ -91,8 +94,8 @@ catalogs:
       specifier: 6.0.3
       version: 6.0.3
     unthrown:
-      specifier: 3.0.0
-      version: 3.0.0
+      specifier: 4.1.0
+      version: 4.1.0
     vitepress:
       specifier: 1.6.4
       version: 1.6.4
@@ -104,8 +107,8 @@ catalogs:
       version: 4.4.3
 
 overrides:
-  '@unthrown/prisma>unthrown': ^3.0.0
-  '@unthrown/orpc>unthrown': ^3.0.0
+  '@unthrown/prisma>unthrown': ^4.1.0
+  '@unthrown/orpc>unthrown': ^4.1.0
 
 importers:
 
@@ -143,7 +146,7 @@ importers:
         version: link:../packages/core
       unthrown:
         specifier: 'catalog:'
-        version: 3.0.0
+        version: 4.1.0
     devDependencies:
       '@btravstack/theme':
         specifier: 'catalog:'
@@ -189,7 +192,7 @@ importers:
         version: 4.12.27
       unthrown:
         specifier: 'catalog:'
-        version: 3.0.0
+        version: 4.1.0
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -203,6 +206,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.2
+      '@unthrown/vitest':
+        specifier: 'catalog:'
+        version: 4.1.0(unthrown@4.1.0)(vitest@4.1.8)
       prisma:
         specifier: 'catalog:'
         version: 7.8.0(magicast@0.5.3)(typescript@6.0.3)
@@ -230,6 +236,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.2
+      '@unthrown/vitest':
+        specifier: 'catalog:'
+        version: 4.1.0(unthrown@4.1.0)(vitest@4.1.8)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 4.1.8(vitest@4.1.8)
@@ -250,7 +259,7 @@ importers:
         version: 6.0.3
       unthrown:
         specifier: 'catalog:'
-        version: 3.0.0
+        version: 4.1.0
       vitest:
         specifier: 'catalog:'
         version: 4.1.8(@types/node@24.13.2)(@vitest/coverage-v8@4.1.8)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
@@ -2115,6 +2124,13 @@ packages:
     peerDependencies:
       '@prisma/client': ^7
 
+  '@unthrown/vitest@4.1.0':
+    resolution: {integrity: sha512-48ZKOblwH3jNF7gGvt6piGQzJR6jqxsXqnOiaaAXmhsOoTwfGQYfdNNqhGkMaAeRDuNvOQjb5sr1G0oaBFuZZQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      unthrown: ^4.1.0
+      vitest: ^4
+
   '@vitejs/plugin-vue@5.2.4':
     resolution: {integrity: sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA==}
     engines: {node: ^18.0.0 || >=20.0.0}
@@ -3754,9 +3770,9 @@ packages:
     resolution: {integrity: sha512-rBJeI5CXAlmy1pV+617WB9J63U6XcazHHF2f2dbJix4XzpUF0RS3Zbj0FGIOCAva5P/d/GBOYaACQ1w+0azUkg==}
     engines: {node: '>= 4.0.0'}
 
-  unthrown@3.0.0:
-    resolution: {integrity: sha512-UXIjZTRgbq3ANGYoH1s1jgK85XDmO2HICllG0wtCSBLBPl+Y+prx36Nk17r2JWdnSeTh8pB1fnzDzNpKTgiPzw==}
-    engines: {node: '>=22.19'}
+  unthrown@4.1.0:
+    resolution: {integrity: sha512-qzbbyiA7CPQ+DwKDIZe+yW5/o7HQjW9/lfiHO0XCqtDiBCaq/ONPFTJoNGLqu19DmPCf+aWXKwZAvbquySXhkA==}
+    engines: {node: '>=20'}
 
   valibot@1.2.0:
     resolution: {integrity: sha512-mm1rxUsmOxzrwnX5arGS+U4T25RdvpPjPN4yR0u9pUBov9+zGVtO84tif1eY4r6zWxVxu3KzIyknJy3rxfRZZg==}
@@ -5491,14 +5507,19 @@ snapshots:
   '@unthrown/orpc@0.0.0(@orpc/client@2.0.0-beta.14)(@orpc/server@2.0.0-beta.14)':
     dependencies:
       '@orpc/client': 2.0.0-beta.14
-      unthrown: 3.0.0
+      unthrown: 4.1.0
     optionalDependencies:
       '@orpc/server': 2.0.0-beta.14
 
   '@unthrown/prisma@0.0.0(@prisma/client@7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3))':
     dependencies:
       '@prisma/client': 7.8.0(prisma@7.8.0(magicast@0.5.3)(typescript@6.0.3))(typescript@6.0.3)
-      unthrown: 3.0.0
+      unthrown: 4.1.0
+
+  '@unthrown/vitest@4.1.0(unthrown@4.1.0)(vitest@4.1.8)':
+    dependencies:
+      unthrown: 4.1.0
+      vitest: 4.1.8(@types/node@24.13.2)(@vitest/coverage-v8@4.1.8)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
 
   '@vitejs/plugin-vue@5.2.4(vite@5.4.21(@types/node@24.13.2)(lightningcss@1.32.0))(vue@3.5.38(typescript@6.0.3))':
     dependencies:
@@ -7173,7 +7194,7 @@ snapshots:
 
   universalify@0.1.2: {}
 
-  unthrown@3.0.0: {}
+  unthrown@4.1.0: {}
 
   valibot@1.2.0(typescript@6.0.3):
     optionalDependencies:

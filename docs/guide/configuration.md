@@ -30,7 +30,9 @@ class AppConfig extends Tag("AppConfig")<AppConfig, z.infer<typeof ConfigSchema>
 
 // A modeled, discriminated error for the E channel (nicer at the edge than a raw
 // issues array). Drop the `mapErr` if `SchemaIssues` is fine for you.
-class ConfigError extends TaggedError("ConfigError")<{ issues: SchemaIssues }> {}
+class ConfigError extends TaggedError("@app/ConfigError", { name: "ConfigError" })<{
+  issues: SchemaIssues;
+}> {}
 
 const AppConfigLive = Layer.make(AppConfig, (ctx: Context<Env>) =>
   fromSchema(ConfigSchema)(ctx.get(Env)).mapErr((issues) => new ConfigError({ issues })),

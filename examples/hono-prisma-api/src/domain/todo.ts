@@ -14,8 +14,14 @@ export type Todo = {
 export type NewTodo = { readonly title: string };
 
 // The todo doesn't exist — a domain-level failure, modeled as a value (404 at the edge).
-export class TodoNotFound extends TaggedError("TodoNotFound")<{ id: string }> {}
+export class TodoNotFound extends TaggedError("@app/TodoNotFound", { name: "TodoNotFound" })<{
+  id: string;
+}> {}
 
 // The repository couldn't be reached / the query failed — an infrastructure failure the
 // port surfaces without leaking Prisma details (500 at the edge).
-export class RepositoryError extends TaggedError("RepositoryError")<{ cause: unknown }> {}
+export class RepositoryError extends TaggedError("@app/RepositoryError", {
+  name: "RepositoryError",
+})<{
+  cause: unknown;
+}> {}
