@@ -3,16 +3,17 @@
 // the graph carries `Scope` in its requirements and can only be run with `Layer.scoped`
 // (which closes the pool on shutdown). Prisma 7 uses a driver adapter (`@prisma/adapter-pg`)
 // over `pg`, and the connection URL is passed to the client here, not baked into the schema.
-// The client is `$extends`ed with the unthrown bridge at construction, so what the container
-// holds — and every consumer sees — is the extended client with the `try*` methods.
+// The client is `$extends`ed with `@unthrown/prisma` at construction, so what the container
+// holds — and every consumer sees — is the extended client with the `try*` methods: each
+// query returns an `AsyncResult` whose error channel is the P-codes that operation can hit.
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { type Context, Layer, Tag } from "demesne";
 import { fromPromise, TaggedError } from "unthrown";
+import { unthrownPrisma } from "@unthrown/prisma";
 
 import { AppConfig } from "../config/env.js";
 import { PrismaClient } from "../generated/prisma/client.ts";
-import { unthrownPrisma } from "./unthrown-prisma.js";
 
 const makeClient = (connectionString: string) =>
   new PrismaClient({ adapter: new PrismaPg({ connectionString }) }).$extends(unthrownPrisma);

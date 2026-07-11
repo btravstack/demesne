@@ -1,15 +1,21 @@
-// HTTP edge — the Hono app is ITSELF a demesne service. `Layer.inject` builds it from the
-// use cases + audit sinks + logger (the record is its declared dependency list — no more
-// hand-maintained `Context<...>` annotation), and the injected `ctx` is the forkScope
-// parent for the per-request scope: a middleware forks `RequestScopeLive` around every
-// request — fresh RequestId, request-tagged logger, x-request-id response header — and the
-// fork closes when the request ends. Handlers map unthrown Results to responses with
-// `.match`: ok → 200/201, a domain `TodoNotFound` → 404, any other modeled error → 500,
-// and a defect (an unmodeled throw) → 500. zod validates the request body.
+// HTTP edge — an oRPC router served by a Hono app that is ITSELF a demesne service.
+// `Layer.inject` builds it from the use cases + audit sinks + logger (the record is its
+// declared dependency list), and the injected `ctx` is the forkScope parent for the
+// per-request scope: the catch-all handler forks `RequestScopeLive` around every request —
+// fresh RequestId, request-tagged logger, x-request-id response header — and the fork
+// closes when the request ends. The forked context travels to the procedures as the oRPC
+// context. Each procedure is a `handlerResult` (`@unthrown/orpc`): the handler speaks
+// `Result`, `Ok` becomes the output, an `Err` mapped to a declared `errors.CODE()` is
+// typed END-TO-END (the client sees the exact code union), and a defect stays a defect
+// (oRPC collapses it to INTERNAL_SERVER_ERROR). zod validates inputs at the procedure
+// boundary. The domain → transport triage lives in one `mapErr` per procedure:
+// `TodoNotFound` → NOT_FOUND, `RepositoryError` → STORAGE_FAILED.
 
-import type { Context as DemesneContext } from "demesne";
-import { Layer, Tag } from "demesne";
+import { type Context as DemesneContext, Layer, type ServiceOf, Tag } from "demesne";
 import { Hono } from "hono";
+import { os } from "@orpc/server";
+import { RPCHandler } from "@orpc/server/fetch";
+import { handlerResult } from "@unthrown/orpc/server";
 import { fromPromise, TaggedError } from "unthrown";
 import { z } from "zod";
 
@@ -20,17 +26,65 @@ import { AuditSinks } from "../application/plugins.js";
 import { Logger } from "../application/ports.js";
 import { RequestId, RequestLogger, RequestScopeLive } from "./request.js";
 
-const CreateTodoBody = z.object({ title: z.string().min(1).max(200) });
+// What the scope middleware hands the procedures: the forked per-request context.
+type RequestScope = DemesneContext<Logger | RequestId | RequestLogger>;
 
-// What the scope middleware exposes to handlers: the forked per-request context.
-type RequestEnv = {
-  Variables: { scope: DemesneContext<Logger | RequestId | RequestLogger> };
+const base = os.$context<{ readonly scope: RequestScope }>();
+
+type RouterDeps = {
+  readonly list: ServiceOf<ListTodos>;
+  readonly get: GetTodo;
+  readonly create: ServiceOf<CreateTodo>;
+  readonly audit: ServiceOf<AuditSinks>;
 };
+
+// Module-scope so the router TYPE is exported for the client side (`RouterClient<TodoRouter>`
+// in the tests) — the value is built per app, closing over the injected use cases.
+const makeRouter = ({ list, get, create, audit }: RouterDeps) => ({
+  todos: {
+    list: base.errors({ STORAGE_FAILED: {} }).handler(
+      handlerResult(({ context, errors }) => {
+        context.scope.get(RequestLogger).info("todos.list");
+        return list().mapErr(() => errors.STORAGE_FAILED());
+      }),
+    ),
+    get: base
+      .input(z.object({ id: z.string() }))
+      .errors({ NOT_FOUND: { message: "todo not found" }, STORAGE_FAILED: {} })
+      .handler(
+        handlerResult(({ context, input, errors }) => {
+          context.scope.get(RequestLogger).info(`todos.get ${input.id}`);
+          return get
+            .execute(input.id)
+            .mapErr((error) =>
+              error._tag === "TodoNotFound" ? errors.NOT_FOUND() : errors.STORAGE_FAILED(),
+            );
+        }),
+      ),
+    create: base
+      .input(z.object({ title: z.string().min(1).max(200) }))
+      .errors({ STORAGE_FAILED: {} })
+      .handler(
+        handlerResult(({ context, input, errors }) => {
+          context.scope.get(RequestLogger).info(`todos.create "${input.title}"`);
+          return create(input)
+            .map((todo) => {
+              // fan the event out to every audit sink (the multi-binding collection)
+              for (const sink of audit) sink.record({ action: "create", detail: todo.id });
+              return todo;
+            })
+            .mapErr(() => errors.STORAGE_FAILED());
+        }),
+      ),
+  },
+});
+
+export type TodoRouter = ReturnType<typeof makeRouter>;
 
 // A handler rejection crossing the fork boundary, qualified into the fork's error union.
 class RequestFailed extends TaggedError("RequestFailed")<{ cause: unknown }> {}
 
-export class HttpApp extends Tag("HttpApp")<HttpApp, Hono<RequestEnv>>() {}
+export class HttpApp extends Tag("HttpApp")<HttpApp, Hono>() {}
 
 // `logger` sits in the record both as the FORK PARENT's dependency — RequestScopeLive needs
 // Logger, and the fork's parent is this layer's own ctx, so Logger must be in the declared
@@ -39,61 +93,28 @@ export const HttpAppLive = Layer.inject(
   HttpApp,
   { list: ListTodos, get: GetTodo, create: CreateTodo, audit: AuditSinks, logger: Logger },
   ({ list, get, create, audit, logger }, ctx) => {
-    const app = new Hono<RequestEnv>();
+    const rpc = new RPCHandler(makeRouter({ list, get, create, audit }));
+    const app = new Hono();
 
-    // Per-request scope: fork off the app context, hand the forked context to handlers,
-    // stamp the response with the request id, close the fork after `next`.
-    app.use(async (c, next) => {
-      const out = await Layer.forkScope(ctx, RequestScopeLive, (reqCtx) => {
-        c.set("scope", reqCtx);
-        c.header("x-request-id", reqCtx.get(RequestId).id);
-        return fromPromise(next(), (cause) => new RequestFailed({ cause }));
-      });
-      if (!out.isOk()) {
-        logger.info(`request failed: ${String(out.isErr() ? out.unwrapErr().cause : "defect")}`);
-        return c.json({ error: "internal error" }, 500);
-      }
-      return;
-    });
-
-    app.get("/todos", async (c) => {
-      c.get("scope").get(RequestLogger).info("GET /todos");
-      return (await list()).match<Response>({
-        ok: (todos) => c.json(todos),
-        err: (error) => c.json({ error: error._tag }, 500),
-        defect: () => c.json({ error: "internal error" }, 500),
-      });
-    });
-
-    app.get("/todos/:id", async (c) => {
-      const id = c.req.param("id");
-      c.get("scope").get(RequestLogger).info(`GET /todos/${id}`);
-      return (await get.execute(id)).match<Response>({
-        ok: (todo) => c.json(todo),
-        err: (error) =>
-          error._tag === "TodoNotFound"
-            ? c.json({ error: "todo not found" }, 404)
-            : c.json({ error: error._tag }, 500),
-        defect: () => c.json({ error: "internal error" }, 500),
-      });
-    });
-
-    app.post("/todos", async (c) => {
-      const body = CreateTodoBody.safeParse(await c.req.json().catch(() => null));
-      if (!body.success) {
-        return c.json(
-          { error: "invalid body", issues: body.error.issues.map((i) => i.message) },
-          400,
-        );
-      }
-      c.get("scope").get(RequestLogger).info(`POST /todos "${body.data.title}"`);
-      return (await create(body.data)).match<Response>({
-        ok: (todo) => {
-          // fan the event out to every audit sink (the multi-binding collection)
-          for (const sink of audit) sink.record({ action: "create", detail: todo.id });
-          return c.json(todo, 201);
+    // Per-request scope: fork off the app context, dispatch to the oRPC handler with the
+    // forked context, stamp the response with the request id, close the fork afterwards.
+    app.all("*", async (c) => {
+      const out = await Layer.forkScope(ctx, RequestScopeLive, (reqCtx) =>
+        fromPromise(
+          rpc.handle(c.req.raw, { prefix: "/rpc", context: { scope: reqCtx } }),
+          (cause) => new RequestFailed({ cause }),
+        ).map(({ response }): Response => {
+          const res = response ?? c.json({ error: "no such procedure" }, 404);
+          res.headers.set("x-request-id", reqCtx.get(RequestId).id);
+          return res;
+        }),
+      );
+      return out.match<Response>({
+        ok: (response) => response,
+        err: (error) => {
+          logger.info(`request failed: ${String(error.cause)}`);
+          return c.json({ error: "internal error" }, 500);
         },
-        err: (error) => c.json({ error: error._tag }, 500),
         defect: () => c.json({ error: "internal error" }, 500),
       });
     });

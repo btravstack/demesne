@@ -1,5 +1,5 @@
-// Infrastructure — the TodoRepository port backed by Prisma, through the unthrown bridge
-// (see unthrown-prisma.ts): each query is a `try*` method returning an `AsyncResult` whose
+// Infrastructure — the TodoRepository port backed by Prisma, through the `@unthrown/prisma`
+// bridge: each query is a `try*` method returning an `AsyncResult` whose
 // error channel is exactly the P-codes that operation can hit, so the repository maps
 // tagged errors into domain ones instead of qualifying raw rejections at every call site.
 // `findById` uses `tryFindUniqueOrThrow` and maps `RecordNotFound` (P2025) to the domain

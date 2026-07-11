@@ -17,9 +17,14 @@ catalog:
   "@commitlint/cli": 21.0.2
   "@commitlint/config-conventional": 21.0.2
   "@hono/node-server": 2.0.6
+  "@orpc/client": 2.0.0-beta.14
+  "@orpc/contract": 2.0.0-beta.14
+  "@orpc/server": 2.0.0-beta.14
   "@prisma/adapter-pg": 7.8.0
   "@prisma/client": 7.8.0
   "@types/node": 24.13.2
+  "@unthrown/orpc": 0.0.0
+  "@unthrown/prisma": 0.0.0
   "@vitest/coverage-v8": 4.1.8
   hono: 4.12.27
   knip: 6.20.0
@@ -39,15 +44,24 @@ catalog:
   vitest: 4.1.8
   zod: 4.4.3
 
+# `@unthrown/prisma@0.0.0` and `@unthrown/orpc@0.0.0` were published with their
+# `unthrown` dependency left as the un-rewritten `workspace:^` protocol, which only
+# resolves inside their own monorepo. Rewrite that edge to the real range until fixed
+# releases ship — then drop this.
+overrides:
+  "@unthrown/prisma>unthrown": ^3.0.0
+  "@unthrown/orpc>unthrown": ^3.0.0
+
 peerDependencyRules:
   ignoreMissing:
     # Optional analytics peer of VitePress's bundled Algolia DocSearch.
     - search-insights
-    # React peers of `@prisma/studio-core`, pulled in transitively by the `prisma`
-    # CLI (v7 bundles Prisma Studio). We never run `prisma studio`, so its GUI's
-    # React peers are irrelevant to the hono-prisma-api example.
+    # React peers of `@prisma/studio-core` (and the radix-ui internals it pulls in),
+    # brought in transitively by the `prisma` CLI (v7 bundles Prisma Studio). We never
+    # run `prisma studio`, so its GUI's React peers are irrelevant to the example.
     - react
     - react-dom
+    - "@types/react"
 
 allowBuilds:
   "@prisma/engines": false
@@ -66,9 +80,13 @@ minimumReleaseAgeStrict: true
 # `unthrown` is demesne's own peer dependency and ships from the sibling repo on the
 # same cadence; a fresh release (e.g. the current 3.x) can be newer than the 7-day
 # window. Exclude it from the maturity delay so the peer resolves, while the delay
-# still guards everything else. `@btravstack/theme` (docs) is excluded for the same reason.
+# still guards everything else. `@unthrown/prisma` and `@unthrown/orpc` (the example's
+# bridges) ship from the same sibling repo; `@btravstack/theme` (docs) is excluded for
+# the same reason.
 minimumReleaseAgeExclude:
   - unthrown
+  - "@unthrown/prisma"
+  - "@unthrown/orpc"
   - "@btravstack/theme"
 
 auditConfig:

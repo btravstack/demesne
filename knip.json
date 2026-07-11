@@ -12,7 +12,7 @@
     },
     "examples/hono-prisma-api": {
       "project": ["src/**/*.ts", "!src/generated/**"],
-      "ignoreDependencies": ["@prisma/client"]
+      "ignoreDependencies": ["@orpc/contract"]
     },
     "docs": {
       "entry": ["scripts/*.ts"],

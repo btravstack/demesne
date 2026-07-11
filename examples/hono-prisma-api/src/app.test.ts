@@ -1,21 +1,27 @@
 // End-to-end tests with NO database. They go through the SAME `bootstrap` as the server
-// (src/app.ts) — the identical wiring, use cases, plugins and routes — swapping only the
+// (src/app.ts) — the identical wiring, use cases, plugins and router — swapping only the
 // repository for an in-memory fake. Because the application depends on the `TodoRepository`
-// *port*, the fake drops in without Prisma or Postgres. The first block drives the real Hono
-// app over HTTP; the second exercises the combinators (collect / forkScope / onStop) on that
-// same app.
+// *port*, the fake drops in without Prisma or Postgres. The first block drives the real app
+// through a TYPED oRPC client (`@unthrown/orpc`'s `createResultClient` over an `RPCLink`
+// whose fetch loops straight back into the Hono app — a genuine request/response cycle,
+// JSON serialization and error inference included, without opening a socket); the second
+// exercises the combinators (collect / forkScope / onStop) on that same app.
 
 import { describe, expect, it } from "vitest";
 
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/fetch";
+import type { RouterClient } from "@orpc/server";
+import { createResultClient } from "@unthrown/orpc/client";
 import { type Context, Layer, type ServiceOf } from "demesne";
-import { Err, fromSafePromise, Ok, type Result } from "unthrown";
+import { Err, Ok, type Result } from "unthrown";
 
 import { AuditSinks } from "./application/plugins.js";
 import { Logger, TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
 import { AppConfig } from "./config/env.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
-import { HttpApp } from "./http/routes.js";
+import { HttpApp, type TodoRouter } from "./http/routes.js";
 import { RequestId, RequestLogger, RequestScopeLive } from "./http/request.js";
 import { HttpServer, HttpServerLive } from "./http/server.js";
 
@@ -55,92 +61,76 @@ const fakeApp = () => bootstrap(Layer.value(TodoRepository, makeFakeRepo()));
 // The app is a SERVICE now: bootstrap wires HttpAppLive, so tests read it from the context.
 const buildTestApp = async () => (await Layer.build(fakeApp())).unwrap().get(HttpApp);
 
-// Reduce a response to the single entity we assert on: its status and parsed body.
-const call = async (
-  app: Awaited<ReturnType<typeof buildTestApp>>,
-  path: string,
-  init?: RequestInit,
-) => {
-  const res = await app.request(path, init);
-  return { status: res.status, body: (await res.json()) as unknown };
-};
-
-const postJson = (title: unknown): RequestInit => ({
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ title }),
-});
-
-describe("todos api (HTTP)", () => {
-  it("GET /todos returns the collection", async () => {
-    const app = await buildTestApp();
-
-    expect(await call(app, "/todos")).toEqual(
-      expect.objectContaining({
-        status: 200,
-        body: [expect.objectContaining({ title: "buy milk" })],
+// Every procedure returns an `AsyncResult`: the errors a procedure declares land TYPED in
+// the error channel (an `ORPCError` union discriminated by `code`); anything undeclared —
+// including an input-validation rejection — is a Defect.
+const clientFor = (app: ServiceOf<HttpApp>) =>
+  createResultClient(
+    createORPCClient<RouterClient<TodoRouter>>(
+      new RPCLink({
+        url: "/rpc",
+        fetch: async (url, init) => app.request(new Request(new URL(url, "http://app.test"), init)),
       }),
+    ),
+  );
+
+describe("todos api (typed oRPC client over the app)", () => {
+  it("todos.list returns the collection", async () => {
+    const rc = clientFor(await buildTestApp());
+
+    expect((await rc.todos.list()).unwrap()).toEqual([
+      expect.objectContaining({ title: "buy milk" }),
+    ]);
+  });
+
+  it("todos.get returns the todo", async () => {
+    const rc = clientFor(await buildTestApp());
+
+    expect((await rc.todos.get({ id: "seed-1" })).unwrap()).toEqual(
+      expect.objectContaining({ title: "buy milk" }),
     );
   });
 
-  it("GET /todos/:id returns the todo", async () => {
-    const app = await buildTestApp();
+  it("todos.get surfaces a missing id as a TYPED NOT_FOUND Err", async () => {
+    const rc = clientFor(await buildTestApp());
 
-    expect(await call(app, "/todos/seed-1")).toEqual(
-      expect.objectContaining({
-        status: 200,
-        body: expect.objectContaining({ title: "buy milk" }),
-      }),
+    expect((await rc.todos.get({ id: "nope" })).unwrapErr()).toEqual(
+      expect.objectContaining({ code: "NOT_FOUND", message: "todo not found", inferable: true }),
     );
   });
 
-  it("GET /todos/:id returns 404 when missing", async () => {
-    const app = await buildTestApp();
+  it("todos.create creates a todo (and fans the event out to the audit sinks)", async () => {
+    const rc = clientFor(await buildTestApp());
 
-    expect(await call(app, "/todos/nope")).toEqual(
-      expect.objectContaining({ status: 404, body: { error: "todo not found" } }),
+    expect((await rc.todos.create({ title: "walk the dog" })).unwrap()).toEqual(
+      expect.objectContaining({ title: "walk the dog", completed: false }),
     );
   });
 
-  it("POST /todos creates a todo (and fans the event out to the audit sinks)", async () => {
-    const app = await buildTestApp();
+  it("todos.create then todos.list includes the new todo", async () => {
+    const rc = clientFor(await buildTestApp());
+    await rc.todos.create({ title: "walk the dog" });
 
-    expect(await call(app, "/todos", postJson("walk the dog"))).toEqual(
-      expect.objectContaining({
-        status: 201,
-        body: expect.objectContaining({ title: "walk the dog" }),
-      }),
+    expect((await rc.todos.list()).unwrap()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "walk the dog" })]),
     );
   });
 
-  it("POST /todos then GET /todos includes the new todo", async () => {
-    const app = await buildTestApp();
-    await call(app, "/todos", postJson("walk the dog"));
+  it("an invalid input is a DEFECT — BAD_REQUEST is not part of the typed contract", async () => {
+    const rc = clientFor(await buildTestApp());
 
-    expect(await call(app, "/todos")).toEqual(
-      expect.objectContaining({
-        status: 200,
-        body: expect.arrayContaining([expect.objectContaining({ title: "walk the dog" })]),
-      }),
-    );
-  });
+    const result = await rc.todos.create({ title: "" });
 
-  it("POST /todos rejects an invalid body with 400", async () => {
-    const app = await buildTestApp();
-
-    expect(await call(app, "/todos", postJson(""))).toEqual(
-      expect.objectContaining({
-        status: 400,
-        body: expect.objectContaining({ error: "invalid body" }),
-      }),
+    expect(result.isDefect() ? result.cause : result).toEqual(
+      expect.objectContaining({ code: "BAD_REQUEST" }),
     );
   });
 
   it("every response carries a fresh x-request-id (per-request forkScope)", async () => {
     const app = await buildTestApp();
 
-    const first = await app.request("/todos");
-    const second = await app.request("/todos");
+    const first = await app.request("/rpc/todos/list", { method: "POST" });
+    const second = await app.request("/rpc/todos/list", { method: "POST" });
 
     expect(first.headers.get("x-request-id")).toMatch(/[0-9a-f-]{36}/);
     expect(first.headers.get("x-request-id")).not.toBe(second.headers.get("x-request-id"));
@@ -206,11 +196,15 @@ describe("combinators on the same app", () => {
     let url = "";
     const out = await Layer.scoped(withServer, (ctx) => {
       url = `http://127.0.0.1:${ctx.get(HttpServer).port}`;
-      return fromSafePromise(fetch(`${url}/todos`).then((res) => res.status));
+      // over a REAL socket this time: the RPCLink uses the global fetch
+      const rc = createResultClient(
+        createORPCClient<RouterClient<TodoRouter>>(new RPCLink({ url: "/rpc", origin: url })),
+      );
+      return rc.todos.list().map((todos) => todos.length);
     });
 
-    expect(out.unwrap()).toBe(200);
+    expect(out.unwrap()).toBe(1);
     // the scope has closed → the listener is released and the port refuses connections
-    await expect(fetch(`${url}/todos`)).rejects.toThrow();
+    await expect(fetch(`${url}/rpc/todos/list`, { method: "POST" })).rejects.toThrow();
   });
 });
