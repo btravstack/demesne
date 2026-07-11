@@ -26,7 +26,7 @@ first-class only because construction _builds to an [`unthrown`](https://github.
 concern: the domain you hold in hand and provision directly, nothing more.
 
 `unthrown` is a **peer dependency**, not a bundled one. demesne re-uses its `Result` /
-`AsyncResult` / `Ok` / `Err` / `fromPromise` / `allAsync` / `TaggedError`; it never
+`AsyncResult` / `Ok` / `Err` / `fromPromise` / `fromSafePromise` / `allAsync` / `TaggedError`; it never
 re-implements them.
 
 ## Two things tracked in the type system

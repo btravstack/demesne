@@ -56,7 +56,8 @@ export default defineConfig({
           text: "Architecture",
           items: [
             { text: "Clean Architecture", link: "/guide/clean-architecture" },
-            { text: "Resources & Scopes", link: "/guide/roadmap" },
+            { text: "Resources & Scopes", link: "/guide/resources-and-scopes" },
+            { text: "Contract Workers", link: "/guide/contract-workers" },
           ],
         },
       ],

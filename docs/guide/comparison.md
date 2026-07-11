@@ -13,7 +13,7 @@ that also models **construction failures as values**.
 | Missing dependency                | **compile error**                            | **compile error**          | ❌ runtime throw            | **compile error**    | ❌ runtime throw            |
 | Decorators / `reflect-metadata`   | ❌ none                                      | ❌ none                    | ✅ required                 | ❌ none              | ✅ required                 |
 | Construction errors               | **typed union `E`**                          | in the effect's `E`        | throws                      | throws               | throws                      |
-| Resource scopes (acquire/release) | ✅ `acquireRelease` + type-enforced `scoped` | ✅ `Scope`                 | ✅ (runtime scopes)         | ❌                   | ✅ (`OnModuleDestroy`)      |
+| Resource scopes (acquire/release) | ✅ `acquireRelease` + type-enforced `scoped` | ✅ `Scope`                 | ✅ (runtime scopes)         | partial (`dispose`)  | ✅ (`OnModuleDestroy`)      |
 | Requirements tracking             | declared at boundaries                       | inferred (`R` channel)     | implicit                    | inferred             | implicit                    |
 | Async construction                | ✅ (parallel via `merge`)                    | ✅                         | partial                     | ❌                   | ✅                          |
 | Runtime model                     | none (builds to `AsyncResult`)               | a full effect runtime      | a container                 | a container          | a container                 |
@@ -65,7 +65,9 @@ dependency is a red squiggle, not a runtime `AwilixResolutionError`.
 
 The `Layer` idea comes from **Scala's ZIO `ZLayer`** (and Effect ported it to TS). ZIO's
 `ZLayer.make` auto-assembles the graph because its requirements live in the types the
-compiler threads for you; demesne deliberately doesn't infer requirements, so it can't
+compiler threads for you. (Effect's `Layer`, despite the inferred `R`, does _not_ auto-assemble
+like this — you still hand-compose with `Layer.provide` / `Layer.merge`; it just infers the
+requirement set for you.) demesne deliberately doesn't infer requirements, so it can't
 auto-assemble safely — you compose the graph by hand with `provideTo` / `merge`, which stays
 single-pass and fully type-checked (a missing dependency is a compile error, and there's no
 runtime resolution to surprise you). Compile-time DI without reflection also lives in
