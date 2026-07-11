@@ -290,12 +290,15 @@ if (wiring.isOk()) {
       defect: (cause) => `query panicked: ${String(cause)}`,
     }),
   );
-} else {
-  // every WIRING failure, handled once as a static union
+} else if (wiring.isErr()) {
+  // every MODELED wiring failure, handled once as a static union (isErr narrows)
   const e = wiring.error;
   console.error(
     e._tag === "@app/ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`,
   );
+} else if (wiring.isDefect()) {
+  // an unmodeled throw during construction — outside the union on purpose
+  console.error(`wiring panicked: ${String(wiring.cause)}`);
 }
 ```
 

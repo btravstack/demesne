@@ -192,11 +192,14 @@ if (wiring.isOk()) {
       defect: (cause) => `query panicked: ${String(cause)}`,
     }),
   );
-} else {
+} else if (wiring.isErr()) {
+  // the modeled wiring union, narrowed by the guard
   const e = wiring.error;
   console.error(
     e._tag === "@app/ConfigError" ? `config failed: ${e.reason}` : `db failed: ${e.url}`,
   );
+} else if (wiring.isDefect()) {
+  console.error(`wiring panicked: ${String(wiring.cause)}`);
 }
 ```
 
