@@ -3,7 +3,7 @@
 // transient `PaymentUnavailable` is retryable (Temporal's policy retries), a permanent
 // `PaymentDeclined` is non-retryable.
 import { defineContract, handler } from "@btravstack/start-kernel";
-import { ActivityRegistry, createActivities, temporal } from "@btravstack/start-temporal";
+import { createActivities, temporal } from "@btravstack/start-temporal";
 import { Layer, Tag } from "demesne";
 import { z } from "zod";
 
@@ -19,8 +19,6 @@ const ChargeContract = defineContract({
 // A per-activity id (a run-tagged logger would live here too).
 class ActivityId extends Tag("@app/ActivityId")<ActivityId, { readonly id: string }>() {}
 const ActivityScopeLive = Layer.factory(ActivityId, () => ({ id: crypto.randomUUID() }));
-
-export { ActivityRegistry };
 
 export const ActivitiesLive = createActivities<ChargeOrder>()(ActivityScopeLive)
   .activity({
