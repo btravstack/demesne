@@ -19,6 +19,13 @@
       "dependsOn": ["^build", "prisma:generate"],
       "cache": false
     },
+    "@demesne-examples/start-orpc-prisma#typecheck": {
+      "dependsOn": ["^build", "prisma:generate"]
+    },
+    "@demesne-examples/start-orpc-prisma#test": {
+      "dependsOn": ["^build", "prisma:generate"],
+      "cache": false
+    },
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,

@@ -1,0 +1,28 @@
+{
+  "name": "@demesne-examples/start-temporal-worker",
+  "private": true,
+  "description": "A Temporal worker built on btravstack start: a demesne-wired charge use case run as an activity, mapping domain errors to retryable / non-retryable and adapting to Temporal ApplicationFailure, with a deterministic workflow.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/worker.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@btravstack/start-kernel": "workspace:*",
+    "@btravstack/start-temporal": "workspace:*",
+    "@temporalio/common": "catalog:",
+    "@temporalio/worker": "catalog:",
+    "@temporalio/workflow": "catalog:",
+    "demesne": "workspace:*",
+    "unthrown": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@demesne/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
