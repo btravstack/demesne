@@ -10,9 +10,10 @@
 //   reads a service neither the parent nor the request layer provides is a compile error).
 
 import { type Context, Layer, type Scope, type Tag } from "demesne";
-import type { AsyncResult, Result } from "unthrown";
+import type { AsyncResult, NotThenable, Result } from "unthrown";
 
 import { type Contract, type ContractError, parseInput } from "./contract.js";
+import { formatIssues } from "./internal/zod.js";
 
 export type BoundHandler<R, In, Out, E> = {
   readonly contract: Contract<In, Out>;
@@ -65,18 +66,36 @@ export const dispatch = <E extends { readonly _tag: string }, D>(
 
 // --- runHandler: the reusable heart of every host's per-invocation `invoke` --------------------
 
-// Open a fresh request scope off the already-built parent (fork = per request/message/activity —
-// factor VI), validate the raw input against the contract, run the handler, then close ONLY the
-// fork's scope (LIFO). Errors union: build error `RErr`, input `ContractError`, domain `E`. The
-// host maps each to its transport disposition and settles the invocation.
+// The contract's output schema is ENFORCED, not advisory: the handler's return value is parsed
+// (zod strips unknown keys, so a rich domain object — e.g. a DB row with columns the contract
+// never promised — cannot leak past the boundary). An output that does not conform is a
+// programming error, not a domain failure — the throw becomes a `Defect` at the edge.
+const enforceOutput = <In, Out>(contract: Contract<In, Out>, output: Out): Out => {
+  const parsed = contract.output.safeParse(output);
+  if (!parsed.success) {
+    throw new Error(
+      `demesne/start: handler output does not match the contract — ${formatIssues(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+};
+
+// Validate the raw input against the contract FIRST — invalid input is rejected before any
+// request-scoped work happens — then open a fresh request scope off the already-built parent
+// (fork = per request/message/activity — factor VI), run the handler, close ONLY the fork's scope
+// (LIFO), and enforce the contract's output on the way out. Errors union: input `ContractError`,
+// build error `RErr`, domain `E`. The host maps each to its transport disposition.
 export const runHandler = <Parent, ReqP, RErr, In, Out, E>(
   parent: Context<Parent>,
   requestLayer: Layer<ReqP, RErr, Parent | Scope>,
   bound: BoundHandler<Parent | ReqP, In, Out, E>,
   rawInput: unknown,
 ): AsyncResult<Out, RErr | ContractError | E> =>
-  Layer.forkScope(parent, requestLayer, (forkCtx) =>
-    parseInput(bound.contract, rawInput)
-      .toAsync()
-      .flatMap((input) => bound.handle(input, forkCtx)),
-  );
+  parseInput(bound.contract, rawInput)
+    .toAsync()
+    .flatMap((input) =>
+      Layer.forkScope(parent, requestLayer, (forkCtx) => bound.handle(input, forkCtx)),
+    )
+    // The cast discharges unthrown's NotThenable guard for the generic `Out`: a contract output
+    // is parsed data from a zod schema, never a thenable.
+    .map((output) => enforceOutput(bound.contract, output) as Out & NotThenable<Out>);

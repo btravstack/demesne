@@ -35,9 +35,13 @@ export type IdempotencyStore = {
   readonly record: (messageId: string) => Promise<void>;
 };
 
+// The service carries its own subscriptions: they are PER-BUILD state (created in acquire, read
+// by release), so a layer reference built in two scopes gets two independent subscription sets —
+// demesne's "separate builds reconstruct" contract — and closing one scope cannot cancel the
+// other's consumers.
 export class Consumer extends Tag("@btravstack/start-amqp/Consumer")<
   Consumer,
-  { readonly queues: readonly string[] }
+  { readonly queues: readonly string[]; readonly subscriptions: readonly AmqpSubscription[] }
 >() {}
 
 export class ConsumeError extends TaggedError("@btravstack/start-amqp/ConsumeError", {
@@ -48,55 +52,75 @@ export class ConsumeError extends TaggedError("@btravstack/start-amqp/ConsumeErr
 
 // Route one delivery: skip (ack) a duplicate, else dispatch and record on success. Total — it
 // never rejects, so a driver that calls it without awaiting can't cause an unhandled rejection.
-// `router.dispatch` is itself total; the guard here covers a throwing idempotency store (I/O),
-// which is treated as transient and requeued.
+// The failure handling is deliberately ASYMMETRIC around the point of processing:
+//   • `seen` (or dispatch) fails BEFORE anything happened → requeue; a retry is safe.
+//   • `record` fails AFTER the message was successfully processed → still ACK. Requeuing here
+//     would guarantee a duplicate execution (redelivered, and — unrecorded — reprocessed), which
+//     is the exact failure the store exists to prevent; at-least-once semantics were already
+//     accepted, so losing one dedupe record is the cheaper failure.
 const deliver = async (
   router: ServiceOf<MessageRouter>,
   delivery: AmqpDelivery,
   store: IdempotencyStore | undefined,
 ): Promise<AmqpDisposition> => {
+  const id = store !== undefined ? delivery.messageId : undefined;
+
+  let disposition: AmqpDisposition;
   try {
-    const id = store !== undefined ? delivery.messageId : undefined;
     if (store !== undefined && id !== undefined && (await store.seen(id))) return amqp.ack();
-
-    const disposition = await router.dispatch(delivery.queue, delivery.body);
-
-    if (store !== undefined && id !== undefined && disposition.kind === "ack") {
-      await store.record(id);
-    }
-    return disposition;
+    disposition = await router.dispatch(delivery.queue, delivery.body);
   } catch {
-    return amqp.requeue();
+    return amqp.requeue(); // nothing was processed yet — safe to retry
   }
+
+  if (store !== undefined && id !== undefined && disposition.kind === "ack") {
+    try {
+      await store.record(id);
+    } catch {
+      // processed successfully — ack anyway; see the asymmetry note above.
+    }
+  }
+  return disposition;
 };
 
 export const runConsumer = (opts: {
   readonly driver: AmqpDriver;
   readonly queues: readonly string[];
   readonly idempotency?: IdempotencyStore;
-}): Layer<Consumer, ConsumeError, MessageRouter | Scope> => {
-  // Shared by acquire (fills) and release (drains) — both closures live in this call.
-  const subscriptions: AmqpSubscription[] = [];
-
-  return Layer.acquireRelease(
+}): Layer<Consumer, ConsumeError, MessageRouter | Scope> =>
+  Layer.acquireRelease(
     Consumer,
     (ctx: Context<MessageRouter>) =>
       fromPromise(
-        (async (): Promise<{ readonly queues: readonly string[] }> => {
+        (async (): Promise<ServiceOf<Consumer>> => {
           const router = ctx.get(MessageRouter);
-          for (const queue of opts.queues) {
-            subscriptions.push(
-              await opts.driver.consume(queue, (delivery) =>
-                deliver(router, delivery, opts.idempotency),
-              ),
-            );
+          // Per-build state: created here, carried on the service, drained by release.
+          const subscriptions: AmqpSubscription[] = [];
+          try {
+            for (const queue of opts.queues) {
+              subscriptions.push(
+                await opts.driver.consume(queue, (delivery) =>
+                  deliver(router, delivery, opts.idempotency),
+                ),
+              );
+            }
+          } catch (cause) {
+            // Partial acquire: the build will fail, so no release is ever registered — cancel
+            // the subscriptions that DID open before surfacing the error (best-effort).
+            for (const subscription of subscriptions) {
+              try {
+                await subscription.cancel();
+              } catch {
+                // best-effort teardown of a failed acquire
+              }
+            }
+            throw cause;
           }
-          return { queues: opts.queues };
+          return { queues: opts.queues, subscriptions };
         })(),
         (cause) => new ConsumeError({ cause }),
       ),
-    async () => {
+    async ({ subscriptions }) => {
       for (const subscription of subscriptions) await subscription.cancel();
     },
   );
-};

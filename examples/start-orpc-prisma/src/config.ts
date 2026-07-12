@@ -9,7 +9,8 @@ import { z } from "zod";
 
 const schema = z.object({
   DATABASE_URL: z.string().startsWith("postgres"),
-  PORT: z.coerce.number().int().positive().default(3000),
+  // 0 is legal: the OS assigns an ephemeral port (the listener reports the real one).
+  PORT: z.coerce.number().int().nonnegative().max(65535).default(3000),
   LOG_LEVEL: z.enum(["debug", "info", "warn"]).default("info"),
 });
 

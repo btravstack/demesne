@@ -55,11 +55,9 @@
     "test:types": "tsc --noEmit -p tsconfig.test-d.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test-d.json"
   },
-  "dependencies": {
-    "@btravstack/start-kernel": "workspace:*"
-  },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",
+    "@btravstack/start-kernel": "workspace:*",
     "@demesne/tsconfig": "workspace:*",
     "@demesne/typedoc": "workspace:*",
     "@types/node": "catalog:",
@@ -75,6 +73,7 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
+    "@btravstack/start-kernel": "workspace:^",
     "demesne": "workspace:^",
     "unthrown": "^4.1.0",
     "zod": "^4.0.0"

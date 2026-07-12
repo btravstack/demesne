@@ -10,9 +10,9 @@ your app as a demesne graph. This package promotes the reusable spine out of the
 
 ## What's here
 
-- **`defineConfig(schema)`** — factor III. Reads a source (default `process.env`) through a
-  zod schema, once, at the edge. Returns a demesne `Config` tag + its layer; a parse failure
-  is a modeled `ConfigError`, never a throw.
+- **`defineConfig(schema, opts?)`** — factor III. Reads a source (default `process.env`)
+  through a zod schema, once, at the edge. Returns a demesne `Config` tag + its layer; a parse
+  failure is a modeled `ConfigError`, never a throw.
 
   ```ts
   export const { Config, ConfigLive } = defineConfig(
@@ -22,6 +22,13 @@ your app as a demesne graph. This package promotes the reusable spine out of the
     }),
   );
   ```
+
+  **One config per graph by default.** The default tag id is fixed, so two `defineConfig`
+  calls meeting in one graph collide on the same runtime key (demesne warns in development).
+  When two configs must coexist — an app plus a library both built on the kernel — each passes
+  a unique id: `defineConfig(schema, { id: "@app/Config" })`. Caveat: two configs with the
+  _same shape_ and different ids share a type, so reading with the wrong tag value is a
+  runtime miss rather than a compile error; distinct shapes stay fully sound.
 
 - **`runHost(app, opts?)`** — factor IX. Builds a `Layer<P, E, Scope>` with `Layer.scoped`,
   runs `use` (default: block until `SIGINT`/`SIGTERM`), then closes the scope so finalizers

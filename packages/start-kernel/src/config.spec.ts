@@ -36,6 +36,23 @@ describe("defineConfig", () => {
     }
   });
 
+  it("two configs with distinct ids coexist in one graph (distinct runtime keys)", async () => {
+    const app = defineConfig(z.object({ NAME: z.string() }), {
+      id: "@test/AppConfig",
+      source: { NAME: "app" },
+    });
+    const lib = defineConfig(z.object({ LEVEL: z.coerce.number() }), {
+      id: "@test/LibConfig",
+      source: { LEVEL: "3" },
+    });
+
+    const both = Layer.merge(app.ConfigLive, lib.ConfigLive);
+
+    await expect(
+      Layer.build(both).map((ctx) => [ctx.get(app.Config).NAME, ctx.get(lib.Config).LEVEL]),
+    ).toBeOkWith(["app", 3]);
+  });
+
   it("yields a ConfigError naming the offending field on invalid input", async () => {
     const { Config, ConfigLive } = defineConfig(schema, { source: { PORT: "-1" } });
 

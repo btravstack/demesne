@@ -26,6 +26,14 @@
       "dependsOn": ["^build", "prisma:generate"],
       "cache": false
     },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "@demesne-examples/start-orpc-prisma#test:integration": {
+      "dependsOn": ["^build", "prisma:generate"],
+      "cache": false
+    },
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,

@@ -5,7 +5,9 @@ import { z } from "zod";
 
 export const { Config, ConfigLive } = defineConfig(
   z.object({
-    PORT: z.coerce.number().int().positive().default(3000),
+    // 0 is legal: the OS assigns an ephemeral port (the listener reports the real one) —
+    // exactly what an integration test or parallel CI run wants.
+    PORT: z.coerce.number().int().nonnegative().max(65535).default(3000),
     LOG_LEVEL: z.enum(["debug", "info", "warn"]).default("info"),
   }),
 );

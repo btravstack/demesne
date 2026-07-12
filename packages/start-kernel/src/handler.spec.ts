@@ -65,18 +65,53 @@ describe("runHandler + handler.use", () => {
     });
   });
 
-  it("surfaces invalid input as a kernel ContractError, before the handler runs", async () => {
+  it("surfaces invalid input as a ContractError, before the handler runs OR the fork opens", async () => {
     let ran = false;
+    let forksBuilt = 0;
     const parent = await buildParent((title) => {
       ran = true;
       return Ok({ id: "t1", title }).toAsync();
     });
+    const countingRequestLayer = Layer.factory(RequestId, () => {
+      forksBuilt += 1;
+      return { id: "req-counted" };
+    });
     const bound = handler.use(contract, CreateTodo, (create, input) => create(input.title));
 
-    await expect(runHandler(parent, RequestIdLive, bound, { title: "" })).toBeErrWith(
+    await expect(runHandler(parent, countingRequestLayer, bound, { title: "" })).toBeErrWith(
       expect.objectContaining({ _tag: "@btravstack/start/ContractError" }),
     );
     expect(ran).toBe(false);
+    // Invalid input must not open a request scope — no request-scoped service was built.
+    expect(forksBuilt).toBe(0);
+  });
+
+  it("enforces the output schema: unknown keys are STRIPPED (no over-exposure past the contract)", async () => {
+    // A rich domain row with a column the contract never promised.
+    const row = { id: "t1", title: "buy milk", secretColumn: "do-not-leak" };
+    const parent = await buildParent(() => Ok(row).toAsync());
+    const bound = handler.use(contract, CreateTodo, (create, input) => create(input.title));
+
+    await expect(runHandler(parent, RequestIdLive, bound, { title: "buy milk" })).toBeOkWith({
+      id: "t1",
+      title: "buy milk",
+    });
+  });
+
+  it("treats a non-conforming output as a Defect (a programming error, not a domain failure)", async () => {
+    const broken = { nope: true } as unknown as Todo;
+    const parent = await buildParent(() => Ok(broken).toAsync());
+    const bound = handler.use(contract, CreateTodo, (create, input) => create(input.title));
+
+    const result = await runHandler(parent, RequestIdLive, bound, { title: "x" });
+
+    const outcome = result.match({
+      ok: () => "ok",
+      err: () => "err",
+      defect: (cause) => `defect:${String(cause)}`,
+    });
+    expect(outcome).toContain("defect:");
+    expect(outcome).toContain("does not match the contract");
   });
 
   it("returns the domain error untranslated, for the mount's disposition map to translate", async () => {

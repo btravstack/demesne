@@ -74,6 +74,11 @@ examples/
   hono-prisma-api/      becomes the first consumer of start-kernel + start-api
 ```
 
+> **As built:** `start-contract` was folded into `start-kernel` — the contract DSL
+> (`defineContract` / `handler` / `runHandler` / `DispositionMap`) is small enough that a
+> separate package added an artifact without adding a boundary. The rest of the layout landed
+> as sketched (plus per-transport example apps beside `hono-prisma-api`).
+
 Publishing namespace: `@btravstack/*` (already owned — cf. `@btravstack/theme`).
 `unthrown` and `demesne` are **peer** dependencies of every `start-*` package, tracked in
 lockstep exactly as demesne pins `unthrown ^4.1`.

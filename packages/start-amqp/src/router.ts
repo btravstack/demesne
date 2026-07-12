@@ -42,53 +42,78 @@ export type ConsumerBuilder<Parent, ReqP, RErr> = {
   readonly build: () => Layer<MessageRouter, never, Parent>;
 };
 
-type Registration<Parent> = (ctx: Context<Parent>, table: Map<string, QueueHandler>) => void;
+type Registration<Parent> = {
+  readonly queue: string;
+  readonly register: (ctx: Context<Parent>, table: Map<string, QueueHandler>) => void;
+};
+
+// Development-only duplicate-registration warn — demesne's duplicate-Tag-id pattern: the
+// NODE_ENV check sits inside the call with dot access on a locally-declared `process`, so
+// bundler define-replacement folds the body out of a production build.
+declare const process: undefined | { readonly env: { readonly NODE_ENV?: string } };
+const warnDuplicateQueue = (queue: string): void => {
+  if (typeof process === "undefined" || process.env.NODE_ENV === "production") return;
+  console.warn(
+    `@btravstack/start-amqp: duplicate consumer for queue ${JSON.stringify(queue)} — ` +
+      `the later registration replaces the earlier one.`,
+  );
+};
 
 // `createConsumer<AppServices>()(requestLayer)` — curried exactly like start-api's `createHttpApp`
 // (Parent explicit, ReqP/RErr inferred), for the same reason: a trivial request layer can't pin
-// Parent by inference.
+// Parent by inference. The builder is IMMUTABLE: each `consume` returns a new builder, so a shared
+// base can be branched without the branches seeing each other's consumers.
 export const createConsumer =
   <Parent>() =>
   <ReqP, RErr>(
     requestLayer: Layer<ReqP, RErr, Parent | Scope>,
   ): ConsumerBuilder<Parent, ReqP, RErr> => {
-    const registrations: Registration<Parent>[] = [];
-
-    const builder: ConsumerBuilder<Parent, ReqP, RErr> = {
-      consume: (spec) => {
-        registrations.push((ctx, table) => {
-          table.set(spec.queue, async (body) => {
-            const result = await runHandler(ctx, requestLayer, spec.handler, body);
-            return result.match({
-              ok: () => amqp.ack(),
-              err: (error) => {
-                if (error instanceof ContractError) {
-                  return amqp.deadLetter(`invalid message: ${error.issues}`);
-                }
-                const tagged = error as { readonly _tag: string };
-                if (Object.hasOwn(spec.errors, tagged._tag)) {
-                  // `E` isn't nameable in this non-generic method; widen to the erased map shape
-                  // (membership already checked, so dispatch won't throw).
-                  return dispatch(
-                    spec.errors as unknown as DispositionMap<
-                      { readonly _tag: string },
-                      AmqpDisposition
-                    >,
-                    tagged,
-                  );
-                }
-                return amqp.requeue();
-              },
-              defect: () => amqp.deadLetter("defect"),
-            });
-          });
-        });
-        return builder;
-      },
+    const makeBuilder = (
+      registrations: readonly Registration<Parent>[],
+    ): ConsumerBuilder<Parent, ReqP, RErr> => ({
+      consume: (spec) =>
+        makeBuilder([
+          ...registrations,
+          {
+            queue: spec.queue,
+            register: (ctx, table) => {
+              table.set(spec.queue, async (body) => {
+                const result = await runHandler(ctx, requestLayer, spec.handler, body);
+                return result.match({
+                  ok: () => amqp.ack(),
+                  err: (error) => {
+                    if (error instanceof ContractError) {
+                      return amqp.deadLetter(`invalid message: ${error.issues}`);
+                    }
+                    const tagged = error as { readonly _tag: string };
+                    if (Object.hasOwn(spec.errors, tagged._tag)) {
+                      // `E` isn't nameable in this non-generic method; widen to the erased map
+                      // shape (membership already checked, so dispatch won't throw).
+                      return dispatch(
+                        spec.errors as unknown as DispositionMap<
+                          { readonly _tag: string },
+                          AmqpDisposition
+                        >,
+                        tagged,
+                      );
+                    }
+                    return amqp.requeue();
+                  },
+                  // Carry the cause so operators can see WHAT dead-lettered, not just that
+                  // something did.
+                  defect: (cause) => amqp.deadLetter(`defect: ${String(cause)}`),
+                });
+              });
+            },
+          },
+        ]),
       build: () =>
         Layer.factory(MessageRouter, (ctx: Context<Parent>) => {
           const table = new Map<string, QueueHandler>();
-          for (const register of registrations) register(ctx, table);
+          for (const registration of registrations) {
+            if (table.has(registration.queue)) warnDuplicateQueue(registration.queue);
+            registration.register(ctx, table);
+          }
           return {
             dispatch: (queue, body) => {
               const settle = table.get(queue);
@@ -98,7 +123,7 @@ export const createConsumer =
             },
           };
         }),
-    };
+    });
 
-    return builder;
+    return makeBuilder([]);
   };

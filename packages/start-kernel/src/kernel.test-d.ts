@@ -35,6 +35,10 @@ const configModule = defineConfig(schema);
 // (both the Config tag's service shape and the ConfigLive layer's channels).
 type _module = Expect<Equal<typeof configModule, ConfigModule<Parsed>>>;
 
+// A custom id flows into the module type (distinct runtime key for a second config in one graph).
+const customConfig = defineConfig(schema, { id: "@test-d/CustomConfig" });
+type _custom = Expect<Equal<typeof customConfig, ConfigModule<Parsed, "@test-d/CustomConfig">>>;
+
 // --- 2. runHost accepts a Scope graph and rejects an unmet service (K3) ------
 
 declare const scopeGraph: Layer<{ readonly a: 1 }, never, Scope>;
@@ -53,6 +57,11 @@ const ranUse = runHost(scopeGraph2, {
   use: (): AsyncResult<number, "useErr"> => 0 as unknown as AsyncResult<number, "useErr">,
 });
 type _ranUse = Expect<Equal<typeof ranUse, AsyncResult<number, "buildErr" | "useErr">>>;
+
+// Without a `use` there is no `A` type parameter to instantiate — claiming a value you won't
+// produce is a compile error (the two overloads take 2 and 4 type arguments, never 3).
+// @ts-expect-error - three explicit type arguments match neither runHost overload.
+runHost<{ readonly a: 1 }, never, number>(scopeGraph);
 
 // --- 3. defineContract infers In/Out from the schemas (no error set on the contract) ---
 

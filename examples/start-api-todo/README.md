@@ -46,3 +46,9 @@ curl localhost:3000/todos/1
 (in-memory); a Postgres build would pass a Prisma-backed layer with the same `TodoRepository`
 port, and every consumer — use cases, routes — stays unchanged. That is the deep, type-checked
 test seam.
+
+## Integration test
+
+`pnpm --filter @demesne-examples/start-api-todo test:integration` — boots the REAL server
+(`runHost`, ephemeral port), drives CRUD over an actual socket, and proves teardown closes the
+listener. No Docker needed — the listener is this example's only infrastructure.

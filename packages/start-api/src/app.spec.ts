@@ -128,4 +128,90 @@ describe("createHttpApp", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: "req-1" });
   });
+
+  it("rejects an ARRAY JSON body with 400 (no spread into numeric keys)", async () => {
+    const app = await buildApp((title) => Ok({ id: "t1", title }).toAsync());
+
+    const res = await app.request("/todos", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ title: "smuggled" }]),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns the route's `success` status on Ok (201 for a create)", async () => {
+    const repo = Layer.value(Repo, {
+      create: (title: string) => Ok({ id: "t9", title }).toAsync(),
+    });
+    const parent = Layer.merge(repo, Layer.provideTo(CreateTodoLive, repo));
+    const httpApp = createHttpApp<Repo | CreateTodo>()(RequestIdLive)
+      .route({
+        method: "POST",
+        path: "/todos",
+        handler: handler.use(CreateTodoContract, CreateTodo, (fn, input) => fn(input.title)),
+        errors: { "@test/RepoError": () => api.error(500) },
+        success: 201,
+      })
+      .build();
+    const built = await Layer.build(Layer.provideTo(httpApp, parent));
+    const app = built.match({
+      ok: (ctx) => ctx.get(HttpApp),
+      err: () => {
+        throw new Error("unexpected build error");
+      },
+      defect: (cause) => {
+        throw cause;
+      },
+    });
+
+    const res = await app.request("/todos", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "created" }),
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("maps a request-scope build failure (RErr — outside the disposition map) to 500", async () => {
+    class ScopeDown extends TaggedError("@test/ScopeDown", { name: "ScopeDown" })<{
+      readonly cause: string;
+    }> {}
+    const failingRequestLayer = Layer.make(RequestId, () =>
+      Err(new ScopeDown({ cause: "redis down" })),
+    );
+    const repo = Layer.value(Repo, {
+      create: (title: string) => Ok({ id: "t1", title }).toAsync(),
+    });
+    const parent = Layer.merge(repo, Layer.provideTo(CreateTodoLive, repo));
+    const httpApp = createHttpApp<Repo | CreateTodo>()(failingRequestLayer)
+      .route({
+        method: "POST",
+        path: "/todos",
+        handler: handler.use(CreateTodoContract, CreateTodo, (fn, input) => fn(input.title)),
+        errors: { "@test/RepoError": () => api.error(500, { error: "storage" }) },
+      })
+      .build();
+    const built = await Layer.build(Layer.provideTo(httpApp, parent));
+    const app = built.match({
+      ok: (ctx) => ctx.get(HttpApp),
+      err: () => {
+        throw new Error("unexpected build error");
+      },
+      defect: (cause) => {
+        throw cause;
+      },
+    });
+
+    const res = await app.request("/todos", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "valid" }),
+    });
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "internal error" });
+  });
 });

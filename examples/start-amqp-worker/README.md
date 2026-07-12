@@ -33,3 +33,10 @@ pnpm --filter @demesne-examples/start-amqp-worker test   # seam test — no brok
 
 The tests build the graph with a fake Payments and drive the `MessageRouter` directly (no broker);
 the real amqplib driver compiles against amqplib's types and is what `server.ts` runs.
+
+## Integration test
+
+`pnpm --filter @demesne-examples/start-amqp-worker test:integration` — the full consume loop
+against a real RabbitMQ via testcontainers (Docker required), through the real amqplib driver:
+ack (drain), dead-letter for declined and malformed messages (no requeue loop), and
+subscription cancellation on shutdown.

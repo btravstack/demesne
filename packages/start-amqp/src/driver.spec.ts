@@ -178,4 +178,133 @@ describe("runConsumer", () => {
     });
     expect(attempt).toBe(2);
   });
+
+  it("still ACKS when the store's record fails after successful processing (no forced duplicate)", async () => {
+    let calls = 0;
+    const router = routerFor((title) => {
+      calls += 1;
+      return Ok({ id: "t1", title }).toAsync();
+    });
+    const { driver, push } = makeFakeDriver();
+    const brokenRecordStore: IdempotencyStore = {
+      seen: () => Promise.resolve(false),
+      record: () => Promise.reject(new Error("store down")),
+    };
+    const consumer = Layer.provideTo(
+      runConsumer({ driver, queues: ["todos.create"], idempotency: brokenRecordStore }),
+      router,
+    );
+
+    const outcome = await Layer.scoped(consumer, () =>
+      fromSafePromise(push({ queue: "todos.create", messageId: "m2", body: { title: "a" } })),
+    );
+
+    outcome.match({
+      // The message WAS processed — requeuing on a failed record would guarantee a duplicate.
+      ok: (disposition) => expect(disposition).toEqual({ kind: "ack" }),
+      err: () => expect.unreachable("no err"),
+      defect: () => expect.unreachable("no defect"),
+    });
+    expect(calls).toBe(1);
+  });
+
+  it("requeues (without processing) when the store's seen check fails", async () => {
+    let calls = 0;
+    const router = routerFor((title) => {
+      calls += 1;
+      return Ok({ id: "t1", title }).toAsync();
+    });
+    const { driver, push } = makeFakeDriver();
+    const brokenSeenStore: IdempotencyStore = {
+      seen: () => Promise.reject(new Error("store down")),
+      record: () => Promise.resolve(),
+    };
+    const consumer = Layer.provideTo(
+      runConsumer({ driver, queues: ["todos.create"], idempotency: brokenSeenStore }),
+      router,
+    );
+
+    const outcome = await Layer.scoped(consumer, () =>
+      fromSafePromise(push({ queue: "todos.create", messageId: "m3", body: { title: "a" } })),
+    );
+
+    outcome.match({
+      ok: (disposition) => expect(disposition).toEqual({ kind: "requeue" }),
+      err: () => expect.unreachable("no err"),
+      defect: () => expect.unreachable("no defect"),
+    });
+    expect(calls).toBe(0); // nothing was processed yet — the retry is safe
+  });
+
+  it("keeps subscriptions PER BUILD: closing an inner scope leaves the outer scope's consumers active", async () => {
+    const cancelCounts: number[] = [];
+    const driver: AmqpDriver = {
+      consume: () => {
+        const index = cancelCounts.push(0) - 1;
+        return Promise.resolve({
+          cancel: () => {
+            cancelCounts[index] = (cancelCounts[index] ?? 0) + 1;
+            return Promise.resolve();
+          },
+        });
+      },
+    };
+    const router = routerFor((title) => Ok({ id: "t1", title }).toAsync());
+    // ONE layer reference, built in two separate scopes — separate builds must reconstruct
+    // and tear down independently (the demesne per-build contract).
+    const consumer = Layer.provideTo(runConsumer({ driver, queues: ["todos.create"] }), router);
+
+    const outcome = await Layer.scoped(consumer, () =>
+      fromSafePromise(
+        (async () => {
+          // open and close a SECOND, independent build of the same reference
+          await Layer.scoped(consumer, () => Ok("inner").toAsync());
+          // the inner scope closed its own subscription (index 1) — the outer's (index 0)
+          // must still be live
+          return [...cancelCounts];
+        })(),
+      ),
+    );
+
+    outcome.match({
+      ok: (countsAfterInnerClose) => expect(countsAfterInnerClose).toEqual([0, 1]),
+      err: () => expect.unreachable("no err"),
+      defect: () => expect.unreachable("no defect"),
+    });
+    // after the outer scope closed too, each subscription was cancelled exactly once
+    expect(cancelCounts).toEqual([1, 1]);
+  });
+
+  it("cancels already-opened subscriptions when a later consume fails during acquire", async () => {
+    let cancelled = 0;
+    const driver: AmqpDriver = {
+      consume: (queue) => {
+        if (queue === "q.fails") return Promise.reject(new Error("broker rejected consumer"));
+        return Promise.resolve({
+          cancel: () => {
+            cancelled += 1;
+            return Promise.resolve();
+          },
+        });
+      },
+    };
+    const router = routerFor((title) => Ok({ id: "t1", title }).toAsync());
+    const consumer = Layer.provideTo(
+      runConsumer({ driver, queues: ["todos.create", "q.fails"] }),
+      router,
+    );
+
+    const outcome = await Layer.scoped(
+      consumer,
+      (): AsyncResult<never, never> => expect.unreachable("use must not run — the build failed"),
+    );
+
+    outcome.match({
+      ok: () => expect.unreachable("expected Err"),
+      err: (error) => expect(error._tag).toBe("@btravstack/start-amqp/ConsumeError"),
+      defect: () => expect.unreachable("no defect"),
+    });
+    // the first queue's subscription must not leak past the failed acquire
+    expect(cancelled).toBe(1);
+  });
 });

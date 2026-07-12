@@ -109,4 +109,39 @@ describe("createActivities", () => {
       reason: "permanent",
     });
   });
+
+  it("treats an activity-scope build failure (RErr — outside the map) as RETRYABLE, naming the tag", async () => {
+    class ScopeDown extends TaggedError("@test/ScopeDown", { name: "ScopeDown" })<{
+      readonly cause: string;
+    }> {}
+    const failingRequestLayer = Layer.make(RequestId, () =>
+      Err(new ScopeDown({ cause: "redis down" })),
+    );
+    const repo = Layer.value(Repo, {
+      create: (title: string) => Ok({ id: "t1", title }).toAsync(),
+    });
+    const parent = Layer.merge(repo, Layer.provideTo(CreateTodoLive, repo));
+    const registryLayer = createActivities<Repo | CreateTodo>()(failingRequestLayer)
+      .activity({
+        name: "createTodo",
+        handler: handler.use(contract, CreateTodo, (fn, input) => fn(input.title)),
+        errors: { "@test/RepoError": () => temporal.nonRetryable("unreachable") },
+      })
+      .build();
+    const built = await Layer.build(Layer.provideTo(registryLayer, parent));
+    const activities = built.match({
+      ok: (ctx) => ctx.get(ActivityRegistry).activities,
+      err: () => {
+        throw new Error("unexpected build error");
+      },
+      defect: (cause) => {
+        throw cause;
+      },
+    });
+
+    await expect(run(activities, "createTodo", { title: "x" })).rejects.toMatchObject({
+      retryable: true,
+      reason: expect.stringContaining("@test/ScopeDown"),
+    });
+  });
 });

@@ -37,3 +37,10 @@ DATABASE_URL=postgres://... pnpm --filter @demesne-examples/start-orpc-prisma ex
 DATABASE_URL=postgres://... pnpm --filter @demesne-examples/start-orpc-prisma dev
 pnpm --filter @demesne-examples/start-orpc-prisma test   # typed client over a fake repo — no DB
 ```
+
+## Integration test
+
+`pnpm --filter @demesne-examples/start-orpc-prisma test:integration` — the full stack against a
+real Postgres via testcontainers (Docker required): `prisma db push`, `runHost` boots Prisma +
+listener, a typed oRPC client drives it over an actual socket (including the Prisma-P2025 →
+`NOT_FOUND` path), and teardown is asserted.

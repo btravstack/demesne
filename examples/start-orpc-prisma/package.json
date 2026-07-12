@@ -8,6 +8,7 @@
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
   "devDependencies": {
     "@demesne/tsconfig": "workspace:*",
     "@orpc/client": "catalog:",
+    "@testcontainers/postgresql": "catalog:",
     "@types/node": "catalog:",
     "@unthrown/vitest": "catalog:",
     "prisma": "catalog:",

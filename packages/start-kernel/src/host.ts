@@ -15,13 +15,29 @@ import { type AsyncResult, fromSafePromise, type Result } from "unthrown";
 
 const DEFAULT_SIGNALS = ["SIGINT", "SIGTERM"] as const satisfies readonly NodeJS.Signals[];
 
-export type RunHostOptions<P, A, E2> = {
-  /** What to do with the built context. Default: block until a shutdown signal (`A = void`). */
-  readonly use?: (ctx: Context<P>) => Result<A, E2> | AsyncResult<A, E2>;
+type BaseOptions<P> = {
   /** Signals that resolve the default `use`. Default: `["SIGINT", "SIGTERM"]`. */
   readonly signals?: readonly NodeJS.Signals[];
   /** Ran after the graph is built (post-`onStart`), before `use` — e.g. a readiness log line. */
   readonly onReady?: (ctx: Context<P>) => void;
+};
+
+export type RunHostOptions<P, A, E2> = BaseOptions<P> & {
+  /** What to do with the built context. Default: block until a shutdown signal (`A = void`). */
+  readonly use?: (ctx: Context<P>) => Result<A, E2> | AsyncResult<A, E2>;
+};
+
+// Two call shapes so the value channel is honest: with a `use`, the result carries its value and
+// unions its error; without one, the result is `AsyncResult<void, E>` and there is no `A` type
+// parameter to (mis)instantiate — `runHost<P, E, number>(app)` matches neither overload.
+type RunHost = {
+  <P, E, A, E2>(
+    app: Layer<P, E, Scope>,
+    opts: BaseOptions<P> & {
+      readonly use: (ctx: Context<P>) => Result<A, E2> | AsyncResult<A, E2>;
+    },
+  ): AsyncResult<A, E | E2>;
+  <P, E>(app: Layer<P, E, Scope>, opts?: BaseOptions<P>): AsyncResult<void, E>;
 };
 
 const waitForShutdown = (signals: readonly NodeJS.Signals[]): Promise<void> =>
@@ -35,7 +51,7 @@ const waitForShutdown = (signals: readonly NodeJS.Signals[]): Promise<void> =>
     for (const signal of signals) process.on(signal, shutdown);
   });
 
-export const runHost = <P, E, A = void, E2 = never>(
+export const runHost: RunHost = (<P, E, A, E2>(
   app: Layer<P, E, Scope>,
   opts?: RunHostOptions<P, A, E2>,
 ): AsyncResult<A, E | E2> => {
@@ -46,9 +62,9 @@ export const runHost = <P, E, A = void, E2 = never>(
   return Layer.scoped(app, (ctx): Result<A, E2> | AsyncResult<A, E2> => {
     onReady?.(ctx);
     if (use !== undefined) return use(ctx);
-    // Default path only: with no `use`, `A` is `void` and `E2` is `never`, so the wait's
-    // `AsyncResult<void, never>` fits `AsyncResult<A, E2>`. The cast covers the unreachable
-    // case where a caller supplied a custom `use` (this branch is dead then).
+    // No-`use` overload only: `A` is `void` and `E2` is `never` there, so the wait's
+    // `AsyncResult<void, never>` is the honest type; the cast bridges the erased
+    // implementation signature (the with-`use` overload never reaches this branch).
     return fromSafePromise(waitForShutdown(signals)) as unknown as AsyncResult<A, E2>;
   });
-};
+}) as RunHost;

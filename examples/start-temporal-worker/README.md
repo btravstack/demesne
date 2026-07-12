@@ -36,3 +36,10 @@ pnpm --filter @demesne-examples/start-temporal-worker test   # seam test — no 
 
 The tests invoke the activity functions directly (and assert the real `ApplicationFailure`
 mapping); `worker.ts` compiles against `@temporalio/worker` and is what a live worker runs.
+
+## Integration test
+
+`pnpm --filter @demesne-examples/start-temporal-worker test:integration` — the REAL
+@temporalio Worker against a real Temporal dev server via testcontainers (Docker required):
+the bundled deterministic workflow executes through the demesne-wired activity, and a declined
+charge fails the workflow immediately (non-retryable short-circuits the retry policy).
