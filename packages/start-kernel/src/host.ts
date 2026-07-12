@@ -26,8 +26,13 @@ export type RunHostOptions<P, A, E2> = {
 
 const waitForShutdown = (signals: readonly NodeJS.Signals[]): Promise<void> =>
   new Promise<void>((resolve) => {
-    const shutdown = (): void => resolve();
-    for (const signal of signals) process.once(signal, shutdown);
+    const shutdown = (): void => {
+      // Remove every registered handler on the first signal, so the handlers for the *other*
+      // signals don't linger on the process after shutdown resolves.
+      for (const signal of signals) process.removeListener(signal, shutdown);
+      resolve();
+    };
+    for (const signal of signals) process.on(signal, shutdown);
   });
 
 export const runHost = <P, E, A = void, E2 = never>(

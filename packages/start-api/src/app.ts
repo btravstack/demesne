@@ -43,14 +43,18 @@ const jsonResponse = (c: HonoContext, body: unknown, status: ApiDisposition["sta
   c.body(JSON.stringify(body), status, { "content-type": "application/json" });
 
 // Build the contract input from the request: path params always apply (authoritative), plus the
-// query string for GET/HEAD or the JSON body otherwise. zod then validates the merged object.
+// query string for GET or the JSON body otherwise. zod then validates the merged object.
 const readInput = async (c: HonoContext): Promise<unknown> => {
   const params = c.req.param();
-  if (c.req.method === "GET" || c.req.method === "HEAD") {
+  if (c.req.method === "GET") {
     return { ...c.req.query(), ...params };
   }
   const body: unknown = await c.req.json().catch(() => ({}));
-  return body !== null && typeof body === "object" ? { ...body, ...params } : params;
+  // Merge path params only into a plain-object body; an array or primitive payload passes through
+  // (params don't apply to it) and the contract's schema validates it as-is.
+  return body !== null && typeof body === "object" && !Array.isArray(body)
+    ? { ...body, ...params }
+    : body;
 };
 
 // `createHttpApp<AppServices>()(requestLayer)` — Parent is declared explicitly (the app's provided
@@ -78,7 +82,7 @@ export const createHttpApp =
                 // Domain errors are mapped by the route's total map; a build error `RErr` or an
                 // unmapped tag is an internal failure.
                 const tagged = error as { readonly _tag: string };
-                if (tagged._tag in spec.errors) {
+                if (Object.hasOwn(spec.errors, tagged._tag)) {
                   // The route's `E` is not nameable inside this non-generic method; widen the map
                   // to its erased shape (membership is already checked, so dispatch won't throw).
                   const disposition = dispatch(

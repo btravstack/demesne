@@ -1,7 +1,7 @@
 // Infrastructure — the concrete adapters. `LoggerLive` reads `Config` for the log level;
 // `TodoRepoLive` is an in-memory store (the volatile adapter — a Prisma/Postgres one would swap in
 // here via the same `bootstrap(repository)` seam, with every consumer unchanged).
-import { Layer, type ServiceOf } from "demesne";
+import { Layer } from "demesne";
 import { Err, Ok } from "unthrown";
 
 import { Config } from "../config.js";
@@ -14,7 +14,7 @@ export const LoggerLive = Layer.inject(Logger, { config: Config }, ({ config }) 
   },
 }));
 
-export const TodoRepoLive = Layer.factory(TodoRepository, (): ServiceOf<TodoRepository> => {
+export const TodoRepoLive = Layer.factory(TodoRepository, () => {
   const store = new Map<string, Todo>();
   let seq = 0;
   return {

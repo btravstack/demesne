@@ -46,19 +46,28 @@ export class ConsumeError extends TaggedError("@btravstack/start-amqp/ConsumeErr
   readonly cause: unknown;
 }> {}
 
-// Route one delivery: skip (ack) a duplicate, else dispatch and record on success.
+// Route one delivery: skip (ack) a duplicate, else dispatch and record on success. Total — it
+// never rejects, so a driver that calls it without awaiting can't cause an unhandled rejection.
+// `router.dispatch` is itself total; the guard here covers a throwing idempotency store (I/O),
+// which is treated as transient and requeued.
 const deliver = async (
   router: ServiceOf<MessageRouter>,
   delivery: AmqpDelivery,
   store: IdempotencyStore | undefined,
 ): Promise<AmqpDisposition> => {
-  const id = store !== undefined ? delivery.messageId : undefined;
-  if (store !== undefined && id !== undefined && (await store.seen(id))) return amqp.ack();
+  try {
+    const id = store !== undefined ? delivery.messageId : undefined;
+    if (store !== undefined && id !== undefined && (await store.seen(id))) return amqp.ack();
 
-  const disposition = await router.dispatch(delivery.queue, delivery.body);
+    const disposition = await router.dispatch(delivery.queue, delivery.body);
 
-  if (store !== undefined && id !== undefined && disposition.kind === "ack") await store.record(id);
-  return disposition;
+    if (store !== undefined && id !== undefined && disposition.kind === "ack") {
+      await store.record(id);
+    }
+    return disposition;
+  } catch {
+    return amqp.requeue();
+  }
 };
 
 export const runConsumer = (opts: {

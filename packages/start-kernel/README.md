@@ -31,8 +31,20 @@ your app as a demesne graph. This package promotes the reusable spine out of the
   await runHost(AppLayer, { onReady: (ctx) => ctx.get(Logger).info("ready") });
   ```
 
+- **The transport seam** — `defineContract` (zod I/O boundary), `handler` / `handler.use`
+  (bind a contract to a demesne-injected edge), `runHandler` (the per-invocation
+  fork → validate → dispatch every host reuses), and `DispositionMap` / `dispatch` (the
+  total domain-error → transport-disposition map). See
+  `design/btravstack-start-handler-binding.md`, and the `start-api` / `start-amqp` /
+  `start-temporal` hosts that build on it.
+
+  ```ts
+  const contract = defineContract({ input: TitleSchema, output: TodoSchema });
+  const create = handler.use(contract, CreateTodo, (todo, input) => todo(input));
+  ```
+
 ## Not here yet
 
-The transport seam — `Host`, `defineContract`, `handler` (see
-`design/btravstack-start-kernel-api.md` and `-handler-binding.md`). This package is the
-config + lifecycle core those build on.
+A formal `Host` interface — deferred until it earns its keep; each host currently exposes its
+own builder (`createHttpApp` / `createConsumer` / `createActivities`) over `runHandler` +
+`DispositionMap`, which turned out to be all the shared seam a host needs.

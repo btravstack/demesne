@@ -19,8 +19,13 @@ const app = createHttpApp<AppServices>()(RequestScopeLive)
   })
   .build(); // Layer<HttpApp, never, AppServices>
 
-// serve it as a resource, torn down on shutdown:
-const graph = Layer.merge(app, Layer.provideTo(httpListener({ port }), app));
+// serve it as a resource, torn down on shutdown. The listener reads its port from the
+// `ListenConfig` service, which the app provides (e.g. mapped from its validated config):
+const ListenConfigLive = Layer.inject(ListenConfig, { config: Config }, ({ config }) => ({
+  port: config.PORT,
+}));
+const base = Layer.merge(app, Layer.provideTo(ListenConfigLive, app));
+const graph = Layer.merge(base, Layer.provideTo(httpListener(), base));
 await runHost(graph, { onReady: (ctx) => ctx.get(Logger).info("ready") });
 ```
 
@@ -29,11 +34,13 @@ await runHost(graph, { onReady: (ctx) => ctx.get(Logger).info("ready") });
 - **`createHttpApp<Parent>()(requestLayer)`** — a builder; `.route(spec)` adds a
   contract+handler+disposition-map route, `.build()` yields the Hono app as a demesne
   service (`HttpApp`, the fork parent for each request).
-- **`httpListener({ port })`** — the Node listener as an `acquireRelease` resource (carries
-  `Scope`, so it runs under `runHost` and closes on shutdown).
+- **`httpListener()`** — the Node listener as an `acquireRelease` resource (carries `Scope`, so
+  it runs under `runHost` and closes on shutdown). Reads its port from the **`ListenConfig`**
+  service the app provides (`Layer.value(ListenConfig, { port })` for a static port, or
+  `Layer.inject` mapped from your config for factor III).
 - **`api.error(status, body?)`** — build an HTTP disposition for a domain error.
 
 ## Not here yet
 
-End-to-end typed clients (oRPC) layered on top of this host. The host _seam_ — the kernel's
-`runHandler` + `DispositionMap` driving a real transport — is what this package proves.
+End-to-end typed clients (oRPC) layered on top of this host — see the `start-orpc-prisma`
+example, which mounts an oRPC router as this host's `HttpApp` service.

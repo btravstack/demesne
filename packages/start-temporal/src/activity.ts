@@ -90,7 +90,7 @@ export const createActivities =
                   throw asFailure(temporal.nonRetryable(`invalid input: ${error.issues}`));
                 }
                 const tagged = error as { readonly _tag: string };
-                if (tagged._tag in spec.errors) {
+                if (Object.hasOwn(spec.errors, tagged._tag)) {
                   // `E` isn't nameable in this non-generic method; widen to the erased map shape
                   // (membership already checked, so dispatch won't throw).
                   throw asFailure(
