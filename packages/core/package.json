@@ -1,6 +1,6 @@
 {
   "name": "demesne",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Type-safe dependency injection: a container holds your services' domain and provides it. Requirements and construction errors are tracked in the type system. Complements unthrown.",
   "keywords": [
     "container",
