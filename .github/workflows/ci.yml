@@ -152,7 +152,9 @@ jobs:
     runs-on: ubuntu-latest
     # Only on PRs: fail if a versioned package changed without a changeset (docs/examples,
     # which are private and unversioned, don't trigger it). `changeset add --empty` opts out.
-    if: github.event_name == 'pull_request'
+    # Skip the auto-generated release PR (`changeset-release/main`): it CONSUMES the changesets
+    # while bumping versions, so `changeset status` would (correctly) find none and fail.
+    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
