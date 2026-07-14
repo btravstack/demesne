@@ -55,8 +55,8 @@ catalogs:
       specifier: 4.1.8
       version: 4.1.8
     hono:
-      specifier: 4.12.27
-      version: 4.12.27
+      specifier: 4.12.28
+      version: 4.12.28
     knip:
       specifier: 6.20.0
       version: 6.20.0
@@ -161,7 +161,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: 'catalog:'
-        version: 2.0.8(hono@4.12.27)
+        version: 2.0.8(hono@4.12.28)
       '@orpc/contract':
         specifier: 'catalog:'
         version: 2.0.0-beta.14
@@ -185,7 +185,7 @@ importers:
         version: link:../../packages/core
       hono:
         specifier: 'catalog:'
-        version: 4.12.27
+        version: 4.12.28
       unthrown:
         specifier: 'catalog:'
         version: 4.1.0
@@ -2765,6 +2765,10 @@ packages:
     resolution: {integrity: sha512-1yrb/+w6HWQJrUCLkJ2IF5jNIPvvFkblV5RNOYl6bV+OA6p9GLcMpHFFGTosSvHvcAUibuUukRqhlYI4z32C7Q==}
     engines: {node: '>=16.9.0'}
 
+  hono@4.12.28:
+    resolution: {integrity: sha512-YwUvVpSF7m1yOblFPrU3Hbo8XhPheBoiyfGuII6z19LnOr6JpDnyyp7LFNrfV56wS8tpvtBFGRISHN02pDdLOA==}
+    engines: {node: '>=16.9.0'}
+
   hookable@5.5.3:
     resolution: {integrity: sha512-Yc+BQe8SvoXH1643Qez1zqLRmbA5rCL+sSmk6TVos0LWVfNIB7PGncdlId77WzLGSIB5KaWgTaNTs2lNVEI6VQ==}
 
@@ -4665,9 +4669,9 @@ snapshots:
     dependencies:
       hono: 4.12.27
 
-  '@hono/node-server@2.0.8(hono@4.12.27)':
+  '@hono/node-server@2.0.8(hono@4.12.28)':
     dependencies:
-      hono: 4.12.27
+      hono: 4.12.28
 
   '@iconify-json/simple-icons@1.2.87':
     dependencies:
@@ -6189,6 +6193,8 @@ snapshots:
   highlight.js@10.7.3: {}
 
   hono@4.12.27: {}
+
+  hono@4.12.28: {}
 
   hookable@5.5.3: {}
 
