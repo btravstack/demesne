@@ -27,7 +27,7 @@ catalog:
   "@unthrown/prisma": 0.1.0
   "@unthrown/vitest": 4.1.0
   "@vitest/coverage-v8": 4.1.8
-  hono: 4.12.27
+  hono: 4.12.28
   knip: 6.20.0
   lefthook: 2.1.9
   oxfmt: 0.56.0
