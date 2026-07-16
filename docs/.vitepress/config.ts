@@ -120,7 +120,7 @@ export default defineConfig({
       "meta",
       { property: "og:image", content: "https://btravstack.github.io/demesne/og-demesne.png" },
     ],
-    ["meta", { name: "twitter:card", content: "summary" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
     [
       "meta",
       { name: "twitter:image", content: "https://btravstack.github.io/demesne/og-demesne.png" },
