@@ -8,7 +8,8 @@ hero:
   text: "Type-safe dependency injection"
   tagline: A container holds your services' domain and provides it — with requirements and construction errors tracked in the type system. The wiring sibling of unthrown.
   image:
-    src: /logo.svg
+    light: /logo-light.svg
+    dark: /logo-dark.svg
     alt: demesne
   actions:
     - theme: brand
