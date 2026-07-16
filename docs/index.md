@@ -37,6 +37,11 @@ features:
     details: No monad, no effect runtime of its own. Async and failure are first-class only because construction builds to an unthrown AsyncResult.
 ---
 
+<div class="btv-wip">
+  <img src="/beet-worker.svg" alt="A beetroot in a hard hat, digging" />
+  <p><strong>demesne is alpha.</strong> A thought experiment in typed wiring — it will evolve, and the API may change without ceremony. The types are the contract; the version number is not, yet.</p>
+</div>
+
 ## At a glance
 
 ```ts

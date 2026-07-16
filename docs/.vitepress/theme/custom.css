@@ -55,3 +55,23 @@
     object-fit: contain;
   }
 }
+
+/* Alpha strip — the worker beet on site beneath the hero. */
+.btv-wip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 12px 0 28px;
+  padding: 16px 20px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 14px;
+}
+.btv-wip img {
+  flex: none;
+  width: 64px;
+  height: 72px;
+}
+.btv-wip p {
+  margin: 0;
+  line-height: 1.55;
+}
