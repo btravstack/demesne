@@ -116,8 +116,14 @@ export default defineConfig({
     ["meta", { property: "og:site_name", content: "demesne" }],
     ["meta", { property: "og:title", content: "demesne" }],
     ["meta", { property: "og:description", content: SITE_DESCRIPTION }],
-    ["meta", { property: "og:image", content: "https://btravstack.github.io/demesne/logo.svg" }],
+    [
+      "meta",
+      { property: "og:image", content: "https://btravstack.github.io/demesne/og-demesne.png" },
+    ],
     ["meta", { name: "twitter:card", content: "summary" }],
-    ["meta", { name: "twitter:image", content: "https://btravstack.github.io/demesne/logo.svg" }],
+    [
+      "meta",
+      { name: "twitter:image", content: "https://btravstack.github.io/demesne/og-demesne.png" },
+    ],
   ],
 });
