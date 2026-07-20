@@ -58,8 +58,8 @@ catalogs:
       specifier: 4.12.28
       version: 4.12.28
     knip:
-      specifier: 6.20.0
-      version: 6.20.0
+      specifier: 6.26.0
+      version: 6.26.0
     lefthook:
       specifier: 2.1.9
       version: 2.1.9
@@ -121,7 +121,7 @@ importers:
         version: 21.0.2
       knip:
         specifier: 'catalog:'
-        version: 6.20.0
+        version: 6.26.0
       lefthook:
         specifier: 'catalog:'
         version: 2.1.9
@@ -2905,8 +2905,8 @@ packages:
   jsonfile@4.0.0:
     resolution: {integrity: sha512-m6F1R3z8jjlf2imQHS2Qez5sjKWQzbuuhuJ/FKYFRZvPE3PuHcSMVZzfsLhGVOkfd20obL5SWEBew5ShlquNxg==}
 
-  knip@6.20.0:
-    resolution: {integrity: sha512-q+HYrS7FOERk32GM7g43IdTG7TurN7+YMLZrNpCxubZPYZyQwliBgd18yH4oYQL7YgGtOxP2fCqess3K2XaK2Q==}
+  knip@6.26.0:
+    resolution: {integrity: sha512-e9eELEEpBpGTd4H4HB7818/DYj9dMzMyUqAddfYwUN/EbSkgIjOuWEF96W/xHsmV0SDrsdXjIM+oZ2xpPzPsBA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
@@ -6297,7 +6297,7 @@ snapshots:
     optionalDependencies:
       graceful-fs: 4.2.11
 
-  knip@6.20.0:
+  knip@6.26.0:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.4)
       formatly: 0.3.0
