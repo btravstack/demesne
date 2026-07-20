@@ -11,7 +11,7 @@ packages:
   - docs
 
 catalog:
-  "@arethetypeswrong/cli": 0.18.4
+  "@arethetypeswrong/cli": 0.18.5
   "@btravstack/theme": 1.6.1
   "@changesets/cli": 2.31.0
   "@commitlint/cli": 21.0.2
