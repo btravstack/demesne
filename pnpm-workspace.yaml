@@ -83,6 +83,14 @@ minimumReleaseAgeExclude:
   - "@unthrown/vitest"
   - "@btravstack/theme"
 
+overrides:
+  # Security patches for high-severity CVEs in transitive dev/tool dependencies.
+  # brace-expansion: DoS via exponential-time expansion (GHSA-3jxr-9vmj-r5cp)
+  "brace-expansion@>=5.0.0 <5.0.7": "5.0.7"
+  # js-yaml: YAML merge-key quadratic CPU consumption (GHSA-52cp-r559-cp3m)
+  "js-yaml@>=4.0.0 <4.3.0": "4.3.0"
+  "js-yaml@>=3.0.0 <3.15.0": "3.15.0"
+
 auditConfig:
   ignoreGhsas:
     # vite `server.fs.deny` bypass on Windows alternate paths. Reaches us only
