@@ -70,10 +70,10 @@ overrides:
   # GHSA-fx2h-pf6j-xcff / GHSA-v6wh-96g9-6wx3 / GHSA-4w7w-66w2-5vf9: vite
   # `server.fs.deny` bypass and related dev-server issues (docs-only; the docs
   # ship as static HTML). Reaches us via docs > vitepress > vite. vitepress 1.6.x
-  # pins vite ^5.4.14 with no patched 5.x release, so pull vite up to 6.4.3 (the
-  # first fixed version) — the docs `vitepress build` is verified against it. This
-  # also drags esbuild up to a patched 0.25.x (GHSA-67mh-4wv8-2f99).
-  vite: 6.4.3
+  # pins vite ^5.4.14 with no patched 5.x release, so lift any pre-6.4.3 vite to
+  # 6.4.3 (the first fixed version) — the docs `vitepress build` is verified
+  # against it. This also drags esbuild up to a patched 0.25.x (GHSA-67mh-4wv8-2f99).
+  "vite@<6.4.3": "6.4.3"
   # GHSA-92pp-h63x-v22m: @hono/node-server request smuggling in the 1.x line,
   # pulled in by the `prisma` CLI's dev server (@prisma/dev). 1.19.13 is the
   # patched 1.x release. (The direct `@hono/node-server` catalog dep is 2.x.)
