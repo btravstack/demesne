@@ -31,7 +31,7 @@ catalog:
   knip: 6.26.0
   lefthook: 2.1.9
   oxfmt: 0.58.0
-  oxlint: 1.72.0
+  oxlint: 1.73.0
   prisma: 7.8.0
   publint: 0.3.21
   tsdown: 0.22.3
