@@ -28,7 +28,7 @@ catalog:
   "@unthrown/vitest": 4.1.0
   "@vitest/coverage-v8": 4.1.8
   hono: 4.12.28
-  knip: 6.20.0
+  knip: 6.26.0
   lefthook: 2.1.9
   oxfmt: 0.56.0
   oxlint: 1.72.0
