@@ -1,5 +1,12 @@
 # demesne
 
+## 0.2.1
+
+### Patch Changes
+
+- 02493ad: Adopt @btravstack/tsconfig@0.2.0 (verbatimModuleSyntax), @btravstack/oxlint@0.2.1 (consistent-type-imports), and @btravstack/lefthook.
+- aab3c8a: Consume the shared `@btravstack/tsconfig` / `@btravstack/typedoc` published config directly (the local `tools/*` packages are removed; consumers now extend `@btravstack/*` and take it from the catalog).
+
 ## 0.2.0
 
 ### Minor Changes
