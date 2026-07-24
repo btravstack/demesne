@@ -20,7 +20,7 @@ jobs:
     uses: btravstack/config/.github/workflows/ci-reusable.yml@workflows-v1
     with:
       changeset: true
-      node-floor: "22.19"
+      node-versions: '["", "22.19"]'
 
   package-check:
     name: Package
