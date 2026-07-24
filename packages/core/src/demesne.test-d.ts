@@ -9,6 +9,8 @@
 // error channel is the real union, `Context` is contravariant, scopes are enforced,
 // and the combinators (`merge` / `collect` / lifecycle hooks) compute every channel exactly.
 
+import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
+
 import {
   type Context,
   Layer,
@@ -18,7 +20,6 @@ import {
   type ServiceOf,
   Tag,
 } from "./index.js";
-import { type AsyncResult, Ok, type Result, TaggedError } from "unthrown";
 
 // --- assertion helpers -------------------------------------------------------
 

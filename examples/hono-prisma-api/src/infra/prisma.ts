@@ -8,9 +8,9 @@
 // query returns an `AsyncResult` whose error channel is the P-codes that operation can hit.
 
 import { PrismaPg } from "@prisma/adapter-pg";
+import { unthrownPrisma } from "@unthrown/prisma";
 import { type Context, Layer, Tag } from "demesne";
 import { fromPromise, TaggedError } from "unthrown";
-import { unthrownPrisma } from "@unthrown/prisma";
 
 import { AppConfig } from "../config/env.js";
 import { PrismaClient } from "../generated/prisma/client.ts";

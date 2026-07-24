@@ -4,7 +4,6 @@
 // The bare import below establishes the workspace dependency for knip and for turbo
 // build ordering (`^build:docs` runs before this script).
 import "demesne";
-
 import { cp, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

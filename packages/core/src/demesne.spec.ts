@@ -1,10 +1,3 @@
-import { describe, expect, it, vi } from "vitest";
-
-// Registers the Result/AsyncResult matchers (toBeOk / toBeOkWith / toBeErr /
-// toBeErrTagged / toBeErrWith / toBeDefect) — the org-wide assertion DNA.
-import "@unthrown/vitest";
-
-import { Context, Layer, Service, Tag } from "./index.js";
 import {
   type AsyncResult,
   Err,
@@ -14,6 +7,12 @@ import {
   type Result,
   TaggedError,
 } from "unthrown";
+// Registers the Result/AsyncResult matchers (toBeOk / toBeOkWith / toBeErr /
+// toBeErrTagged / toBeErrWith / toBeDefect) — the org-wide assertion DNA.
+import "@unthrown/vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { Context, Layer, Service, Tag } from "./index.js";
 
 // Recover a service's shape from its tag when a signature wants it by name.
 type ServiceOf<T> = T extends Tag<unknown, infer S> ? S : never;
