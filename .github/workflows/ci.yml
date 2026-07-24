@@ -1,22 +1,26 @@
 name: CI
 permissions:
   contents: read
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   ci:
     uses: btravstack/config/.github/workflows/ci-reusable.yml@workflows-v1
     with:
       changeset: true
-      bundle-size: true
       node-floor: "22.19"
-      test-command: "pnpm test -- --coverage --reporter=default --reporter=github-actions"
 
   package-check:
     name: Package
@@ -25,12 +29,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
       - name: Setup
         uses: ./.github/actions/setup
-
       - name: Build the published package
         run: pnpm --filter demesne build
-
       - name: Validate published surface (publint + are-the-types-wrong)
         run: pnpm --filter demesne run check:package
