@@ -12,7 +12,7 @@ import { CreateTodoLive } from "./application/create-todo.js";
 import { GetTodoLive } from "./application/get-todo.js";
 import { ListTodosLive } from "./application/list-todos.js";
 import { AuditSinksLive } from "./application/plugins.js";
-import { TodoRepository } from "./application/ports.js";
+import { type TodoRepository } from "./application/ports.js";
 import { HttpAppLive } from "./http/routes.js";
 import { LoggerLive } from "./infra/logger.js";
 
