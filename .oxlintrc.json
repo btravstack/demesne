@@ -1,10 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["./node_modules/@btravstack/oxlint/base.json"],
   "ignorePatterns": ["**/*.test-d.ts", "**/generated/**"],
-  "rules": {
-    "@typescript-eslint/no-explicit-any": "error",
-    "typescript/consistent-type-definitions": ["error", "type"]
-  },
   "overrides": [
     {
       "files": ["packages/core/src/index.ts"],

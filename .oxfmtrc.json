@@ -9,8 +9,5 @@
     "packages/core/src/index.ts",
     "**/generated/**"
   ],
-  "organizeImports": {
-    "sortImports": true,
-    "separateGroups": true
-  }
+  "sortImports": true
 }

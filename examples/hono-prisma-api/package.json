@@ -24,7 +24,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@demesne/tsconfig": "workspace:*",
+    "@btravstack/tsconfig": "catalog:",
     "@orpc/client": "catalog:",
     "@types/node": "catalog:",
     "@unthrown/vitest": "catalog:",

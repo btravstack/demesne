@@ -6,11 +6,11 @@
 import { type Context, Layer } from "demesne";
 import { type AsyncResult, TaggedError } from "unthrown";
 
+import { bootstrap } from "./bootstrap.js";
 import { ConfigLive } from "./config/env.js";
 import { HttpServerLive } from "./http/server.js";
 import { Database, DatabaseLive } from "./infra/prisma.js";
 import { TodoRepoLive } from "./infra/todo-repository.js";
-import { bootstrap } from "./bootstrap.js";
 
 // A startup-check failure is one more way construction can fail — it joins the error union.
 class MigrationError extends TaggedError("@app/MigrationError", { name: "MigrationError" })<{

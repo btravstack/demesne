@@ -7,25 +7,23 @@
 // JSON serialization and error inference included, without opening a socket); the second
 // exercises the combinators (collect / forkScope / onStop) on that same app.
 
-import { describe, expect, it } from "vitest";
-
+import { createORPCClient } from "@orpc/client";
 // Registers the Result/AsyncResult matchers — the org-wide assertion DNA.
 import "@unthrown/vitest";
-
-import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { createResultClient } from "@unthrown/orpc/client";
 import { type Context, Layer, type ServiceOf } from "demesne";
 import { Err, Ok, type Result } from "unthrown";
+import { describe, expect, it } from "vitest";
 
 import { AuditSinks } from "./application/plugins.js";
 import { Logger, TodoRepository } from "./application/ports.js";
 import { bootstrap } from "./bootstrap.js";
 import { AppConfig } from "./config/env.js";
 import { type Todo, TodoNotFound } from "./domain/todo.js";
-import { HttpApp, type TodoRouter } from "./http/routes.js";
 import { RequestId, RequestLogger, RequestScopeLive } from "./http/request.js";
+import { HttpApp, type TodoRouter } from "./http/routes.js";
 import { HttpServer, HttpServerLive } from "./http/server.js";
 
 // An in-memory stand-in for the Prisma-backed repository — same port, no I/O.
