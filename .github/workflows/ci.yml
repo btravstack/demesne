@@ -1,70 +1,22 @@
 name: CI
 permissions:
   contents: read
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   ci:
-    uses: btravstack/config/.github/workflows/ci-reusable.yml@main
+    uses: btravstack/config/.github/workflows/ci-reusable.yml@workflows-v1
     with:
       changeset: true
-      # knip has an extra pre-step (Prisma client generation), so it stays a
-      # bespoke job below rather than running via the reusable workflow.
-      knip: false
+      bundle-size: true
+      node-floor: "22.19"
       test-command: "pnpm test -- --coverage --reporter=default --reporter=github-actions"
-
-  knip:
-    name: Knip
-    needs: ci
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Setup
-        uses: ./.github/actions/setup
-
-      # knip resolves the example's `../generated/prisma/client.ts` import; generate it
-      # explicitly rather than relying on the install-time postinstall hook.
-      - name: Generate the Prisma client
-        run: pnpm --filter @demesne-examples/hono-prisma-api run prisma:generate
-
-      - name: Run knip
-        run: pnpm exec knip --reporter github-actions
-
-  node-floor:
-    name: Node 22 (engine floor)
-    needs: ci
-    runs-on: ubuntu-latest
-    # CI otherwise runs the .node-version (24). Exercise the declared `engines.node`
-    # floor so the published package is verified on the oldest supported Node.
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-
-      - name: Setup Node 22
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22.19"
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Build + test the published package on Node 22
-        run: pnpm --filter demesne build && pnpm --filter demesne test
 
   package-check:
     name: Package
@@ -82,29 +34,3 @@ jobs:
 
       - name: Validate published surface (publint + are-the-types-wrong)
         run: pnpm --filter demesne run check:package
-
-  bundle-size:
-    name: Bundle Size
-    needs: ci
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Setup
-        uses: ./.github/actions/setup
-
-      - name: Build the published package
-        run: pnpm --filter demesne build
-
-      - name: Report bundle size (gzipped, shipped entry points)
-        run: |
-          echo "## Bundle size (gzipped)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| File | Raw | Gzip |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|-----|------|" >> $GITHUB_STEP_SUMMARY
-          for f in packages/core/dist/index.mjs packages/core/dist/index.cjs; do
-            raw=$(wc -c < "$f" | tr -d ' ')
-            gz=$(gzip -c "$f" | wc -c | tr -d ' ')
-            echo "| $(basename "$f") | ${raw} B | ${gz} B |" >> $GITHUB_STEP_SUMMARY
-          done
